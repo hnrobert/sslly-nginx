@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/hnrobert/sslly-nginx/internal/config"
@@ -22,6 +23,10 @@ func NewManager() *Manager {
 
 func (m *Manager) Start() error {
 	log.Println("Starting nginx...")
+
+	// Remove stale PID file if it exists
+	os.Remove("/var/run/nginx.pid")
+
 	cmd := exec.Command("nginx", "-g", "daemon off;")
 
 	// Start nginx in background
@@ -31,8 +36,16 @@ func (m *Manager) Start() error {
 
 	m.cmd = cmd
 
-	// Wait a moment for nginx to start
+	// Wait a moment for nginx to start and write PID file
 	time.Sleep(2 * time.Second)
+
+	// Write PID file manually since daemon off doesn't do it properly
+	if m.cmd.Process != nil {
+		pidStr := fmt.Sprintf("%d\n", m.cmd.Process.Pid)
+		if err := os.WriteFile("/var/run/nginx.pid", []byte(pidStr), 0644); err != nil {
+			log.Printf("WARNING: Failed to write PID file: %v", err)
+		}
+	}
 
 	return nil
 }
@@ -54,10 +67,14 @@ func (m *Manager) Reload() error {
 		return fmt.Errorf("nginx configuration test failed: %s", string(output))
 	}
 
-	// Reload nginx
-	cmd = exec.Command("nginx", "-s", "reload")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("nginx reload failed: %s", string(output))
+	// Use kill -HUP to reload nginx gracefully instead of nginx -s reload
+	// This is more reliable when nginx is running in non-daemon mode
+	if m.cmd != nil && m.cmd.Process != nil {
+		if err := m.cmd.Process.Signal(os.Signal(syscall.SIGHUP)); err != nil {
+			return fmt.Errorf("failed to send SIGHUP to nginx: %w", err)
+		}
+	} else {
+		return fmt.Errorf("nginx process not found")
 	}
 
 	return nil
@@ -127,6 +144,9 @@ http {
     keepalive_timeout 65;
     types_hash_max_size 2048;
 
+    # Enable HTTP/2
+    http2 on;
+
 `)
 
 	if hasAnyCerts {
@@ -147,7 +167,7 @@ http {
 	// Add default HTTPS server that redirects to HTTP for domains without valid certificates
 	sb.WriteString(`    # Default HTTPS server - redirect to HTTP for invalid/missing certificates
     server {
-        listen ` + httpsPort + ` ssl http2 default_server;
+        listen ` + httpsPort + ` ssl default_server;
         server_name _;
 
         # Use a dummy self-signed certificate
@@ -197,7 +217,7 @@ http {
 			// Certificate found - create HTTPS server block
 			sb.WriteString(fmt.Sprintf(`    # HTTPS server block for %s -> localhost:%s
     server {
-        listen %s ssl http2;
+        listen %s ssl;
         server_name %s;
         ssl_certificate %s;
         ssl_certificate_key %s;
