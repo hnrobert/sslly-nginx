@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sslly-nginx/internal/config"
-	"github.com/sslly-nginx/internal/ssl"
+	"github.com/hnrobert/sslly-nginx/internal/config"
+	"github.com/hnrobert/sslly-nginx/internal/ssl"
 )
 
 type Manager struct {
@@ -143,6 +143,26 @@ http {
 
 `)
 	}
+
+	// Add default HTTPS server that redirects to HTTP for domains without valid certificates
+	sb.WriteString(`    # Default HTTPS server - redirect to HTTP for invalid/missing certificates
+    server {
+        listen ` + httpsPort + ` ssl http2 default_server;
+        server_name _;
+
+        # Use a dummy self-signed certificate
+        ssl_certificate /etc/nginx/ssl/dummy.crt;
+        ssl_certificate_key /etc/nginx/ssl/dummy.key;
+
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers HIGH:!aNULL:!MD5;
+
+        location / {
+            return 301 http://$host$request_uri;
+        }
+    }
+
+`)
 
 	// Generate server blocks for each port and domain
 	for port, domains := range cfg.Ports {

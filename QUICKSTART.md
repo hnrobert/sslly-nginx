@@ -63,12 +63,13 @@ Application started successfully
 2. **HTTPS (Port 443)**:
    - Listens for `example.com` → proxies to `localhost:1234`
    - Listens for `api.example.com` → proxies to `localhost:5678`
+   - If accessed with invalid/missing certificate → redirects to HTTP (301)
 3. **Hot Reload**: Automatically updates when you change config or certificates
 
 **Without SSL Certificates** (HTTP-only mode):
 
 1. **HTTP (Port 80)**: Proxies traffic directly to your applications
-2. No HTTPS redirect
+2. **HTTPS (Port 443)**: Redirects to HTTP (301) to avoid certificate errors
 3. You can add certificates later and service will automatically switch to HTTPS mode
 
 ## Customizing Nginx Ports

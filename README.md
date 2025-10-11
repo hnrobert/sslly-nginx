@@ -113,7 +113,8 @@ ssl/
 - Each domain must have exactly one certificate (no duplicates)
 - Both `.crt` and `.key` files must exist
 - Certificates are matched by domain name automatically
-- **SSL certificates are optional**: If no certificate is found for a domain, the service will proxy HTTP traffic directly (no HTTPS redirect)
+- **SSL certificates are optional**: If no certificate is found for a domain, the service will proxy HTTP traffic directly
+- **HTTPS to HTTP redirect**: If HTTPS is accessed for domains without valid certificates, traffic is redirected to HTTP (301)
 
 ### HTTP-Only Mode
 
@@ -122,7 +123,8 @@ If you don't have SSL certificates yet or want to serve some domains over HTTP o
 1. The application will automatically detect missing certificates
 2. Domains without certificates will be served over HTTP (no redirect)
 3. Domains with certificates will use HTTPS with automatic HTTP → HTTPS redirect
-4. You can mix HTTP and HTTPS domains in the same configuration
+4. **HTTPS fallback**: If someone accesses HTTPS for a domain without a valid certificate, they'll be redirected to HTTP with a 301 status
+5. You can mix HTTP and HTTPS domains in the same configuration
 
 Example scenario:
 
@@ -137,7 +139,12 @@ Example scenario:
 
 ### Automatic HTTPS Redirect
 
-When SSL certificates are detected, all HTTP traffic is automatically redirected to HTTPS. If no certificates are found for any domain, HTTP traffic is proxied directly to your applications.
+When SSL certificates are detected:
+
+- All HTTP traffic for domains **with certificates** is automatically redirected to HTTPS
+- HTTPS traffic for domains **without certificates** is redirected to HTTP (301) to avoid certificate errors
+
+If no certificates are found for any domain, HTTP traffic is proxied directly to your applications.
 
 ### Hot Reload
 

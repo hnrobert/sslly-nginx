@@ -6,7 +6,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/sslly-nginx/internal/app"
+	"github.com/hnrobert/sslly-nginx/internal/app"
 )
 
 func main() {

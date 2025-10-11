@@ -6,10 +6,10 @@ import (
 	"os"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/sslly-nginx/internal/config"
-	"github.com/sslly-nginx/internal/nginx"
-	"github.com/sslly-nginx/internal/ssl"
-	"github.com/sslly-nginx/internal/watcher"
+	"github.com/hnrobert/sslly-nginx/internal/config"
+	"github.com/hnrobert/sslly-nginx/internal/nginx"
+	"github.com/hnrobert/sslly-nginx/internal/ssl"
+	"github.com/hnrobert/sslly-nginx/internal/watcher"
 )
 
 const (

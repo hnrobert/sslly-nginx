@@ -1,4 +1,4 @@
-module github.com/sslly-nginx
+module github.com/hnrobert/sslly-nginx
 
 go 1.21
 
