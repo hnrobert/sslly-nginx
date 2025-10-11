@@ -15,39 +15,48 @@ type Certificate struct {
 
 // ScanCertificates recursively scans the SSL directory for certificates
 func ScanCertificates(sslDir string) (map[string]Certificate, error) {
-	certMap := make(map[string]Certificate)
+	// We'll first collect candidates for certs and keys by a normalized domain name
+	// Normalization: strip trailing _bundle from base name so domain_bundle.crt and domain.key map to same domain
+	type candidate struct {
+		certs []string
+		keys  []string
+	}
+
+	candidates := make(map[string]*candidate)
 	duplicates := make(map[string][]string)
 
 	err := filepath.Walk(sslDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-
 		if info.IsDir() {
 			return nil
 		}
 
-		// Check for certificate files
 		filename := info.Name()
-		domain := extractDomain(filename)
+		// determine if file looks like cert or key
+		lower := strings.ToLower(filename)
+		var domain string
+		if strings.HasSuffix(lower, ".crt") || strings.HasSuffix(lower, ".key") {
+			domain = extractDomain(filename)
+		}
 		if domain == "" {
 			return nil
 		}
 
-		// Check if this is a cert or key file
-		if strings.HasSuffix(filename, ".crt") {
-			keyPath := strings.TrimSuffix(path, ".crt") + ".key"
-			if _, err := os.Stat(keyPath); err == nil {
-				if existing, exists := certMap[domain]; exists {
-					duplicates[domain] = append(duplicates[domain], existing.CertPath, path)
-				} else {
-					certMap[domain] = Certificate{
-						CertPath: path,
-						KeyPath:  keyPath,
-					}
-					log.Printf("Found certificate for domain: %s (cert: %s, key: %s)", domain, path, keyPath)
-				}
-			}
+		// normalize domain by removing trailing _bundle if present
+		norm := strings.TrimSuffix(domain, "_bundle")
+
+		c := candidates[norm]
+		if c == nil {
+			c = &candidate{}
+			candidates[norm] = c
+		}
+
+		if strings.HasSuffix(lower, ".crt") {
+			c.certs = append(c.certs, path)
+		} else if strings.HasSuffix(lower, ".key") {
+			c.keys = append(c.keys, path)
 		}
 
 		return nil
@@ -57,7 +66,33 @@ func ScanCertificates(sslDir string) (map[string]Certificate, error) {
 		return nil, fmt.Errorf("failed to scan SSL directory: %w", err)
 	}
 
-	// Check for duplicates
+	certMap := make(map[string]Certificate)
+
+	// Pair up certs and keys for each normalized domain
+	for norm, c := range candidates {
+		if len(c.certs) == 0 || len(c.keys) == 0 {
+			// no complete pair
+			continue
+		}
+
+		// If multiple certs or keys exist for same normalized domain, treat as duplicate
+		if len(c.certs) > 1 || len(c.keys) > 1 {
+			duplicates[norm] = append(duplicates[norm], append(c.certs, c.keys...)...)
+			continue
+		}
+
+		certPath := c.certs[0]
+		keyPath := c.keys[0]
+
+		// determine final domain key to store: prefer plain domain over _bundle variant
+		// extractDomain on filenames returns original base (may include _bundle); prefer without
+		finalDomain := norm
+
+		// store
+		certMap[finalDomain] = Certificate{CertPath: certPath, KeyPath: keyPath}
+		log.Printf("Found certificate for domain: %s (cert: %s, key: %s)", finalDomain, certPath, keyPath)
+	}
+
 	if len(duplicates) > 0 {
 		for domain, paths := range duplicates {
 			return nil, fmt.Errorf("duplicate certificates found for domain %s: %v", domain, paths)
