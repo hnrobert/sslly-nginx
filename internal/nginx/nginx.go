@@ -87,6 +87,20 @@ func GenerateConfig(cfg *config.Config, certMap map[string]ssl.Certificate) stri
 		httpsPort = p
 	}
 
+	// Check if any configured domains have certificates
+	hasAnyCerts := false
+	for _, domains := range cfg.Ports {
+		for _, domain := range domains {
+			if _, ok := certMap[domain]; ok {
+				hasAnyCerts = true
+				break
+			}
+		}
+		if hasAnyCerts {
+			break
+		}
+	}
+
 	// Nginx base configuration
 	sb.WriteString(`user nginx;
 worker_processes auto;
@@ -113,7 +127,11 @@ http {
     keepalive_timeout 65;
     types_hash_max_size 2048;
 
-    # HTTP to HTTPS redirect for all domains
+`)
+
+	if hasAnyCerts {
+		// If we have certificates, redirect HTTP to HTTPS
+		sb.WriteString(`    # HTTP to HTTPS redirect for all domains
     server {
         listen ` + httpPort + ` default_server;
         server_name _;
@@ -124,17 +142,40 @@ http {
     }
 
 `)
+	}
 
-	// Generate HTTPS server blocks for each port and domain
+	// Generate server blocks for each port and domain
 	for port, domains := range cfg.Ports {
 		for _, domain := range domains {
 			cert, ok := certMap[domain]
 			if !ok {
-				log.Printf("WARNING: No certificate found for domain: %s", domain)
+				// No certificate found - create HTTP-only server block
+				log.Printf("WARNING: No certificate found for domain: %s, serving over HTTP only", domain)
+				sb.WriteString(fmt.Sprintf(`    # HTTP server block for %s -> localhost:%s (no SSL)
+    server {
+        listen %s;
+        server_name %s;
+
+        location / {
+            proxy_pass http://127.0.0.1:%s;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+
+            # WebSocket support
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+        }
+    }
+
+`, domain, port, httpPort, domain, port))
 				continue
 			}
 
-			sb.WriteString(fmt.Sprintf(`    # Server block for %s -> localhost:%s
+			// Certificate found - create HTTPS server block
+			sb.WriteString(fmt.Sprintf(`    # HTTPS server block for %s -> localhost:%s
     server {
         listen %s ssl http2;
         server_name %s;

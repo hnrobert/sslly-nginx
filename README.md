@@ -26,7 +26,7 @@ A smart Nginx SSL reverse proxy manager that automatically configures SSL certif
 ### Prerequisites
 
 - Docker and Docker Compose
-- SSL certificates for your domains
+- SSL certificates for your domains (optional - service can run in HTTP-only mode)
 - Running applications on local ports
 
 ### Installation
@@ -54,7 +54,10 @@ A smart Nginx SSL reverse proxy manager that automatically configures SSL certif
      - b.com
    ```
 
-4. Add your SSL certificates to the `ssl/` directory (see [SSL Certificate Structure](#ssl-certificate-structure))
+4. (Optional) Add your SSL certificates to the `ssl/` directory (see [SSL Certificate Structure](#ssl-certificate-structure))
+
+   - If no certificates are provided, the service will run in HTTP-only mode
+   - You can add certificates later and the service will automatically reload
 
 5. Start the service:
 
@@ -110,12 +113,31 @@ ssl/
 - Each domain must have exactly one certificate (no duplicates)
 - Both `.crt` and `.key` files must exist
 - Certificates are matched by domain name automatically
+- **SSL certificates are optional**: If no certificate is found for a domain, the service will proxy HTTP traffic directly (no HTTPS redirect)
+
+### HTTP-Only Mode
+
+If you don't have SSL certificates yet or want to serve some domains over HTTP only:
+
+1. The application will automatically detect missing certificates
+2. Domains without certificates will be served over HTTP (no redirect)
+3. Domains with certificates will use HTTPS with automatic HTTP → HTTPS redirect
+4. You can mix HTTP and HTTPS domains in the same configuration
+
+Example scenario:
+
+```yaml
+# config.yaml
+1234:
+  - secure.example.com # Has certificate → HTTPS
+  - dev.example.com # No certificate → HTTP only
+```
 
 ## Features in Detail
 
 ### Automatic HTTPS Redirect
 
-All HTTP (port 80) traffic is automatically redirected to HTTPS (port 443).
+When SSL certificates are detected, all HTTP traffic is automatically redirected to HTTPS. If no certificates are found for any domain, HTTP traffic is proxied directly to your applications.
 
 ### Hot Reload
 
@@ -133,7 +155,9 @@ When changes are detected:
 
 ### Error Handling
 
-- **Initial Startup**: If configuration or certificates are invalid, the container stops
+- **Initial Startup**:
+  - If configuration is invalid, the service stops
+  - Missing SSL certificates are **not** an error - service runs in HTTP-only mode
 - **Runtime Errors**: If reload fails, the application:
   - Logs detailed error messages
   - Restores the last working configuration

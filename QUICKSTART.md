@@ -19,7 +19,7 @@ Edit `configs/config.yaml`:
   - api.example.com
 ```
 
-### 2. Add SSL Certificates
+### 2. Add SSL Certificates (Optional)
 
 Add your SSL certificates to the `ssl/` directory:
 
@@ -30,6 +30,8 @@ ssl/
 ├── api.example.com_bundle.crt
 └── api.example.com_bundle.key
 ```
+
+**Note**: SSL certificates are optional. If you skip this step, the service will run in HTTP-only mode. You can add certificates later and the service will automatically reload.
 
 ### 3. Start the Service
 
@@ -55,11 +57,19 @@ Application started successfully
 
 ## What It Does
 
+**With SSL Certificates**:
+
 1. **HTTP (Port 80)**: Redirects all traffic to HTTPS
 2. **HTTPS (Port 443)**:
    - Listens for `example.com` → proxies to `localhost:1234`
    - Listens for `api.example.com` → proxies to `localhost:5678`
 3. **Hot Reload**: Automatically updates when you change config or certificates
+
+**Without SSL Certificates** (HTTP-only mode):
+
+1. **HTTP (Port 80)**: Proxies traffic directly to your applications
+2. No HTTPS redirect
+3. You can add certificates later and service will automatically switch to HTTPS mode
 
 ## Customizing Nginx Ports
 
@@ -113,16 +123,18 @@ make build
 
 - Check `docker-compose logs`
 - Verify `configs/config.yaml` exists
-- Ensure certificates exist for all domains
+- Check for configuration errors in logs
 
 **Certificate not found?**
 
+- This is not an error! The service will run in HTTP-only mode
 - Check filename matches pattern: `domain.crt/key` or `domain_bundle.crt/key`
-- Both `.crt` and `.key` must exist
+- Both `.crt` and `.key` must exist for HTTPS to work
 
 **Port already in use?**
 
-- Service uses host network (ports 80 and 443)
+- Service uses host network (ports 80 and 443 by default)
+- Stop other services using these ports or configure custom ports via environment variables
 - Stop other services using these ports
 
 ## Next Steps

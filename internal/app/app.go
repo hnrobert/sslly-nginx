@@ -146,11 +146,11 @@ func (a *App) reload() error {
 		return fmt.Errorf("failed to scan certificates: %w", err)
 	}
 
-	// Validate all domains have certificates
+	// Log warnings for domains without certificates (but don't fail)
 	for _, domains := range cfg.Ports {
 		for _, domain := range domains {
 			if _, ok := certMap[domain]; !ok {
-				return fmt.Errorf("no certificate found for domain: %s", domain)
+				log.Printf("WARNING: No certificate found for domain: %s (will serve over HTTP)", domain)
 			}
 		}
 	}
