@@ -27,7 +27,7 @@ go.work.sum
 
 # IDE
 .idea/
-.vscode/
+# .vscode/
 *.swp
 *.swo
 *~

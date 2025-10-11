@@ -1,10 +1,24 @@
-name: CI
+name: Test
 
 on:
   push:
     branches: ["**"]
+    paths:
+      - ".github/workflows/test.yml"
+      - "Dockerfile"
+      - ".dockerignore"
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
   pull_request:
     branches: ["**"]
+    paths:
+      - ".github/workflows/test.yml"
+      - "Dockerfile"
+      - ".dockerignore"
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
 
 jobs:
   test:
@@ -36,27 +50,3 @@ jobs:
             gofmt -s -d .
             exit 1
           fi
-
-  build:
-    name: Build
-    runs-on: ubuntu-latest
-    needs: test
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Go with cache
-        uses: ./.github/actions/setup-go
-        with:
-          go-version: "1.21"
-
-      - name: Build
-        run: go build -v -o bin/sslly-nginx ./cmd/sslly-nginx
-
-      - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: sslly-nginx-binary
-          path: bin/sslly-nginx
-          retention-days: 7

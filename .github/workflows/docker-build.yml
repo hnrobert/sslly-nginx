@@ -5,6 +5,13 @@ on:
     branches:
       - main
       - develop
+    paths:
+      - ".github/workflows/docker-build.yml"
+      - "Dockerfile"
+      - ".dockerignore"
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
 
 env:
   REGISTRY: ghcr.io
