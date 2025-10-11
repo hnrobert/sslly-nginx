@@ -1,14 +1,12 @@
-version: "3.8"
-
 services:
   sslly-nginx:
-    build: .
+    image: ghcr.io/hnrobert/sslly-nginx:latest
     container_name: sslly-nginx
     network_mode: host
-    restart: on-failure
+    restart: always
     volumes:
-      - ./configs:/app/configs:ro
-      - ./ssl:/app/ssl:ro
+      - ./configs:/app/configs
+      - ./ssl:/app/ssl
     environment:
       - TZ=Asia/Shanghai
       - LANG=zh_CN.UTF-8

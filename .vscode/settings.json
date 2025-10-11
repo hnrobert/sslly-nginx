@@ -7,6 +7,8 @@
         "fsnotify",
         "gofmt",
         "GOMODCACHE",
+        "GOOS",
+        "installsuffix",
         "pipefail",
         "softprops",
         "sslly"
