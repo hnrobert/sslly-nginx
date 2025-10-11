@@ -10,4 +10,7 @@ services:
       - ./configs:/app/configs:ro
       - ./ssl:/app/ssl:ro
     environment:
-      - TZ=UTC
+      - TZ=Asia/Shanghai
+      - LANG=zh_CN.UTF-8
+      - LANGUAGE=zh_CN:zh
+      - LC_ALL=zh_CN.UTF-8
