@@ -15,6 +15,12 @@ type Certificate struct {
 
 // ScanCertificates recursively scans the SSL directory for certificates
 func ScanCertificates(sslDir string) (map[string]Certificate, error) {
+	// Convert sslDir to absolute path first
+	absSslDir, err := filepath.Abs(sslDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get absolute path for SSL directory: %w", err)
+	}
+
 	// We'll first collect candidates for certs and keys by a normalized domain name
 	// Normalization: strip trailing _bundle from base name so domain_bundle.crt and domain.key map to same domain
 	type candidate struct {
@@ -25,7 +31,7 @@ func ScanCertificates(sslDir string) (map[string]Certificate, error) {
 	candidates := make(map[string]*candidate)
 	duplicates := make(map[string][]string)
 
-	err := filepath.Walk(sslDir, func(path string, info os.FileInfo, err error) error {
+	err = filepath.Walk(absSslDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
