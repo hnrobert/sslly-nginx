@@ -1,0 +1,18 @@
+services:
+  sslly-nginx:
+    image: ghcr.io/hnrobert/sslly-nginx:latest
+    container_name: sslly-nginx
+    network_mode: host
+    restart: always
+    volumes:
+      - ./configs:/app/configs
+      - ./ssl:/app/ssl
+    environment:
+      - TZ=Asia/Shanghai
+      - LANG=zh_CN.UTF-8
+      - LANGUAGE=zh_CN:zh
+      - LC_ALL=zh_CN.UTF-8
+      # Nginx listen ports (optional)
+      # You can override these to run on non-standard ports
+      - SSL_NGINX_HTTP_PORT=80
+      - SSL_NGINX_HTTPS_PORT=443

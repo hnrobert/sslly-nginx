@@ -1,0 +1,45 @@
+# Git files
+.git
+.gitignore
+
+# CI/CD
+.github
+
+# Documentation
+README.md
+LICENSE
+
+# Configuration and SSL (will be mounted as volumes)
+configs/
+ssl/
+
+# Build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+sslly-nginx
+
+# Test files
+*_test.go
+*.test
+*.out
+coverage.txt
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.yml
+.dockerignore
+
+# Development
+Makefile
