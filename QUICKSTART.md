@@ -61,6 +61,23 @@ Application started successfully
    - Listens for `api.example.com` → proxies to `localhost:5678`
 3. **Hot Reload**: Automatically updates when you change config or certificates
 
+## Customizing Nginx Ports
+
+By default the service listens on HTTP port `80` and HTTPS port `443`. You can override them via Docker Compose environment variables:
+
+- `SSL_NGINX_HTTP_PORT` — default `80`
+- `SSL_NGINX_HTTPS_PORT` — default `443`
+
+Example (`docker-compose.yml` snippet):
+
+```yaml
+services:
+  sslly-nginx:
+    environment:
+      - SSL_NGINX_HTTP_PORT=8080
+      - SSL_NGINX_HTTPS_PORT=8443
+```
+
 ## Common Commands
 
 ```bash

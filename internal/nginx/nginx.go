@@ -3,6 +3,7 @@ package nginx
 import (
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -76,6 +77,16 @@ func (m *Manager) CheckHealth() error {
 func GenerateConfig(cfg *config.Config, certMap map[string]ssl.Certificate) string {
 	var sb strings.Builder
 
+	// Read ports from environment with sensible defaults
+	httpPort := "80"
+	httpsPort := "443"
+	if p := os.Getenv("SSL_NGINX_HTTP_PORT"); p != "" {
+		httpPort = p
+	}
+	if p := os.Getenv("SSL_NGINX_HTTPS_PORT"); p != "" {
+		httpsPort = p
+	}
+
 	// Nginx base configuration
 	sb.WriteString(`user nginx;
 worker_processes auto;
@@ -104,9 +115,9 @@ http {
 
     # HTTP to HTTPS redirect for all domains
     server {
-        listen 80 default_server;
+        listen ` + httpPort + ` default_server;
         server_name _;
-        
+
         location / {
             return 301 https://$host$request_uri;
         }
@@ -125,23 +136,21 @@ http {
 
 			sb.WriteString(fmt.Sprintf(`    # Server block for %s -> localhost:%s
     server {
-        listen 443 ssl http2;
+        listen %s ssl http2;
         server_name %s;
-
         ssl_certificate %s;
         ssl_certificate_key %s;
-        
+
         ssl_protocols TLSv1.2 TLSv1.3;
         ssl_ciphers HIGH:!aNULL:!MD5;
         ssl_prefer_server_ciphers on;
-
         location / {
             proxy_pass http://127.0.0.1:%s;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
-            
+
             # WebSocket support
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
@@ -149,7 +158,7 @@ http {
         }
     }
 
-`, domain, port, domain, cert.CertPath, cert.KeyPath, port))
+`, domain, port, httpsPort, domain, cert.CertPath, cert.KeyPath, port))
 		}
 	}
 

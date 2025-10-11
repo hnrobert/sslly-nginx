@@ -226,6 +226,11 @@ The `docker-compose.yml` is configured with:
   - `./configs:/app/configs:ro` - Configuration (read-only)
   - `./ssl:/app/ssl:ro` - SSL certificates (read-only)
 
+Environment variables
+
+- `SSL_NGINX_HTTP_PORT` (default: `80`) — port Nginx listens for HTTP and redirect to HTTPS
+- `SSL_NGINX_HTTPS_PORT` (default: `443`) — port Nginx listens for HTTPS
+
 ## Project Structure
 
 ```tree
