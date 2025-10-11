@@ -174,6 +174,24 @@ When changes are detected:
 
 The generated Nginx configuration includes WebSocket support for all proxied applications.
 
+### Advanced Proxy Features
+
+The reverse proxy includes optimized settings for various applications:
+
+- **Large File Upload**: Supports files up to 100MB by default
+- **Proxy Headers**: Includes all standard headers (Host, X-Real-IP, X-Forwarded-For, X-Forwarded-Host, X-Forwarded-Proto)
+- **Cookie Security**: Automatically sets Secure flag for cookies when using HTTPS
+- **Timeouts**: Configured with 60s timeouts for connect/send/read operations
+- **Proxy Buffering**: Optimized buffer settings for better performance
+
+These settings work well with applications like:
+
+- qBittorrent
+- Portainer
+- Jellyfin
+- Home Assistant
+- And most other web applications
+
 ## Development
 
 ### Build Locally

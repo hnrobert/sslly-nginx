@@ -9,6 +9,7 @@
         "GOMODCACHE",
         "GOOS",
         "installsuffix",
+        "Jellyfin",
         "pipefail",
         "softprops",
         "sslly"

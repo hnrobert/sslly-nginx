@@ -147,6 +147,15 @@ http {
     # Enable HTTP/2
     http2 on;
 
+    # Allow large file uploads
+    client_max_body_size 100M;
+
+    # Proxy buffer settings
+    proxy_buffering on;
+    proxy_buffer_size 4k;
+    proxy_buffers 8 4k;
+    proxy_busy_buffers_size 8k;
+
 `)
 
 	if hasAnyCerts {
@@ -198,15 +207,23 @@ http {
 
         location / {
             proxy_pass http://127.0.0.1:%s;
-            proxy_set_header Host $host;
+            proxy_http_version 1.1;
+
+            # Standard proxy headers
+            proxy_set_header Host $proxy_host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Host $http_host;
             proxy_set_header X-Forwarded-Proto $scheme;
 
             # WebSocket support
-            proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection "upgrade";
+
+            # Timeouts
+            proxy_connect_timeout 60s;
+            proxy_send_timeout 60s;
+            proxy_read_timeout 60s;
         }
     }
 
@@ -225,17 +242,29 @@ http {
         ssl_protocols TLSv1.2 TLSv1.3;
         ssl_ciphers HIGH:!aNULL:!MD5;
         ssl_prefer_server_ciphers on;
+
         location / {
             proxy_pass http://127.0.0.1:%s;
-            proxy_set_header Host $host;
+            proxy_http_version 1.1;
+
+            # Standard proxy headers
+            proxy_set_header Host $proxy_host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Host $http_host;
             proxy_set_header X-Forwarded-Proto $scheme;
 
             # WebSocket support
-            proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection "upgrade";
+
+            # Set Secure flag for cookies when using HTTPS
+            proxy_cookie_path / "/; Secure";
+
+            # Timeouts
+            proxy_connect_timeout 60s;
+            proxy_send_timeout 60s;
+            proxy_read_timeout 60s;
         }
     }
 
