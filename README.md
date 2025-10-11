@@ -179,17 +179,24 @@ The generated Nginx configuration includes WebSocket support for all proxied app
 The reverse proxy includes optimized settings for various applications:
 
 - **Large File Upload**: Supports files up to 100MB by default
-- **Proxy Headers**: Includes all standard headers (Host, X-Real-IP, X-Forwarded-For, X-Forwarded-Host, X-Forwarded-Proto)
+- **Correct Host Header**: Uses `$host` to preserve the original request hostname (critical for apps like qBittorrent, OnlineJudge)
+- **Proxy Headers**: Includes all standard headers:
+  - `Host`: Original request hostname (e.g., `torrent.hnrobert.space`)
+  - `X-Real-IP`: Client's real IP address
+  - `X-Forwarded-For`: Full proxy chain
+  - `X-Forwarded-Host`: Original Host header
+  - `X-Forwarded-Proto`: Original protocol (http/https)
 - **Cookie Security**: Automatically sets Secure flag for cookies when using HTTPS
 - **Timeouts**: Configured with 60s timeouts for connect/send/read operations
 - **Proxy Buffering**: Optimized buffer settings for better performance
 
 These settings work well with applications like:
 
-- qBittorrent
-- Portainer
-- Jellyfin
-- Home Assistant
+- qBittorrent (WebUI)
+- Portainer (Docker management)
+- Jellyfin (Media streaming)
+- Home Assistant (Smart home)
+- OnlineJudge (Competitive programming)
 - And most other web applications
 
 ## Development
