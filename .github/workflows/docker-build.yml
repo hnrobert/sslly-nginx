@@ -22,8 +22,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v4
+      - name: Setup Go with cache
+        uses: ./.github/actions/setup-go
         with:
           go-version: "1.21"
 
@@ -31,7 +31,7 @@ jobs:
         run: go test -v ./...
 
       - name: Build binary
-        run: go build -v ./cmd/sslly-nginx
+        run: go build -v -o bin/sslly-nginx ./cmd/sslly-nginx
 
       - name: Log in to Container Registry
         uses: docker/login-action@v3
