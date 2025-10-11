@@ -1,0 +1,13 @@
+version: "3.8"
+
+services:
+  sslly-nginx:
+    build: .
+    container_name: sslly-nginx
+    network_mode: host
+    restart: on-failure
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./ssl:/app/ssl:ro
+    environment:
+      - TZ=UTC
