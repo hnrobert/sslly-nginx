@@ -2,6 +2,8 @@
 
 A smart Nginx SSL reverse proxy manager that automatically configures SSL certificates and proxies traffic to your local applications.
 
+![logo](assets/images/logo.png)
+
 ## Features
 
 - 🔄 **Automatic Configuration**: Watches for configuration and SSL certificate changes and automatically reloads Nginx
