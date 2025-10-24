@@ -4,14 +4,21 @@
         "cacheprep",
         "coverprofile",
         "dylib",
+        "frpc",
         "fsnotify",
         "gofmt",
         "GOMODCACHE",
         "GOOS",
+        "homeassistant",
         "installsuffix",
         "Jellyfin",
+        "keyout",
+        "myapp",
+        "newkey",
         "pipefail",
         "softprops",
-        "sslly"
+        "sslly",
+        "subj",
+        "yourdomain"
     ]
 }

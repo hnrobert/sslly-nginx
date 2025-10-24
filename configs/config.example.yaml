@@ -1,13 +1,27 @@
 # Example configuration file for sslly-nginx
 # Copy this file to config.yaml and modify according to your needs
 
-# Format: port: [domains]
-# The key is the local port that the application listens on
-# The value is a list of domains that should be proxied to that port
+# Format Options:
+# 1. port: [domains]           - Proxies to localhost:port (127.0.0.1:port)
+# 2. ip:port: [domains]        - Proxies to specified ip:port
+# 3. hostname:port: [domains]  - Proxies to specified hostname:port
+# 4. [ipv6]:port: [domains]    - Proxies to IPv6 address with brackets
 
+# Example 1: Proxy to localhost (default)
 1234:
   - a.com
   - b.a.com
 
 5678:
   - b.com
+
+# Example 2: Proxy to another machine on LAN
+192.168.31.6:1234:
+  - lan.example.com
+
+# Example 3: Proxy to a named host
+remote-server:8080:
+  - remote.example.com
+# Example 4: Proxy to IPv6 address (use brackets)
+# [2001:db8::1]:3000:
+#   - ipv6.example.com

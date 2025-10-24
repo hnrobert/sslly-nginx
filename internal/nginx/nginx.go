@@ -194,19 +194,23 @@ http {
 `)
 
 	// Generate server blocks for each port and domain
-	for port, domains := range cfg.Ports {
+	for portKey, domains := range cfg.Ports {
+		// Parse the upstream (could be "port" or "ip:port")
+		upstream := config.ParseUpstream(portKey)
+		upstreamAddr := fmt.Sprintf("%s:%s", upstream.Host, upstream.Port)
+
 		for _, domain := range domains {
 			cert, ok := certMap[domain]
 			if !ok {
 				// No certificate found - create HTTP-only server block
-				log.Printf("WARNING: No certificate found for domain: %s, serving over HTTP only", domain)
-				sb.WriteString(fmt.Sprintf(`    # HTTP server block for %s -> localhost:%s (no SSL)
+				log.Printf("WARNING: No certificate found for domain: %s, serving over HTTP only (upstream: %s)", domain, upstreamAddr)
+				sb.WriteString(fmt.Sprintf(`    # HTTP server block for %s -> %s (no SSL)
     server {
         listen %s;
         server_name %s;
 
         location / {
-            proxy_pass http://127.0.0.1:%s;
+            proxy_pass http://%s;
             proxy_http_version 1.1;
 
             # Standard proxy headers
@@ -227,12 +231,13 @@ http {
         }
     }
 
-`, domain, port, httpPort, domain, port))
+`, domain, upstreamAddr, httpPort, domain, upstreamAddr))
 				continue
 			}
 
 			// Certificate found - create HTTPS server block
-			sb.WriteString(fmt.Sprintf(`    # HTTPS server block for %s -> localhost:%s
+			log.Printf("Found certificate for domain: %s (upstream: %s)", domain, upstreamAddr)
+			sb.WriteString(fmt.Sprintf(`    # HTTPS server block for %s -> %s
     server {
         listen %s ssl;
         server_name %s;
@@ -244,7 +249,7 @@ http {
         ssl_prefer_server_ciphers on;
 
         location / {
-            proxy_pass http://127.0.0.1:%s;
+            proxy_pass http://%s;
             proxy_http_version 1.1;
 
             # Standard proxy headers
@@ -268,7 +273,7 @@ http {
         }
     }
 
-`, domain, port, httpsPort, domain, cert.CertPath, cert.KeyPath, port))
+`, domain, upstreamAddr, httpsPort, domain, cert.CertPath, cert.KeyPath, upstreamAddr))
 		}
 	}
 

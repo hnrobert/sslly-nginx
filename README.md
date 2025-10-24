@@ -11,6 +11,7 @@ A smart Nginx SSL reverse proxy manager that automatically configures SSL certif
 - 🔁 **Hot Reload**: Updates Nginx configuration without downtime when files change
 - 🛡️ **Error Recovery**: Maintains the last working configuration and rolls back on failures
 - 🐳 **Docker Ready**: Runs as a containerized service with Docker Compose
+- 🌐 **FRP Integration**: Easy integration with FRP for secure remote access to local services
 - 🚀 **CI/CD Pipeline**: Includes GitHub Actions workflows for testing, building, and releasing
 
 ## How It Works
@@ -25,56 +26,18 @@ A smart Nginx SSL reverse proxy manager that automatically configures SSL certif
 
 ## Quick Start
 
-### Prerequisites
-
-- Docker and Docker Compose
-- SSL certificates for your domains (optional - service can run in HTTP-only mode)
-- Running applications on local ports
-
-### Installation
-
-1. Clone the repository:
-
-   ```bash
-   git clone https://github.com/hnrobert/sslly-nginx.git
-   cd sslly-nginx
-   ```
-
-2. Create configuration file:
-
-   ```bash
-   cp configs/config.example.yaml configs/config.yaml
-   ```
-
-3. Edit `configs/config.yaml` with your port-to-domain mappings:
-
-   ```yaml
-   1234:
-     - a.com
-     - b.a.com
-   5678:
-     - b.com
-   ```
-
-4. (Optional) Add your SSL certificates to the `ssl/` directory (see [SSL Certificate Structure](#ssl-certificate-structure))
-
-   - If no certificates are provided, the service will run in HTTP-only mode
-   - You can add certificates later and the service will automatically reload
-
-5. Start the service:
-
-   ```bash
-   docker-compose up -d
-   ```
+For a quick start & deployment guide, see [docs/QUICKSTART.md](docs/QUICKSTART.md).
 
 ## Configuration
 
 ### Application Configuration
 
-The configuration file (`configs/config.yaml`) maps local ports to domain names:
+The configuration file (`configs/config.yaml`) maps upstream addresses to domain names. It supports multiple formats:
+
+#### Format 1: Port Only (Default to localhost)
 
 ```yaml
-# Format: port: [list of domains]
+# Proxies to 127.0.0.1:port
 1234:
   - example.com
   - www.example.com
@@ -82,8 +45,37 @@ The configuration file (`configs/config.yaml`) maps local ports to domain names:
   - api.example.com
 ```
 
-- **Key**: Local port number where your application is running
-- **Value**: List of domains that should be proxied to this port
+#### Format 2: IP:Port (Proxy to specific IP)
+
+```yaml
+# Proxies to 192.168.31.6:1234
+192.168.31.6:1234:
+  - lan.example.com
+  - local.example.com
+```
+
+#### Format 3: Hostname:Port
+
+```yaml
+# Proxies to remote-server:8080
+remote-server:8080:
+  - remote.example.com
+```
+
+#### Format 4: IPv6 with Brackets
+
+```yaml
+# Proxies to IPv6 address 2001:db8::1 port 3000
+[2001:db8::1]:3000:
+  - ipv6.example.com
+```
+
+**Configuration Key Formats:**
+
+- `port` → Proxies to `127.0.0.1:port` (default)
+- `ip:port` → Proxies to `ip:port`
+- `hostname:port` → Proxies to `hostname:port`
+- `[ipv6]:port` → Proxies to IPv6 address with brackets
 
 ### SSL Certificate Structure
 
@@ -201,6 +193,56 @@ These settings work well with applications like:
 - OnlineJudge (Competitive programming)
 - And most other web applications
 
+## FRP Integration
+
+`sslly-nginx` integrates seamlessly with [FRP (Fast Reverse Proxy)](https://github.com/fatedier/frp) to expose your local services through remote servers, enabling secure remote access to your applications from anywhere.
+
+### Key Benefits
+
+- **Secure Remote Access**: Access your local applications from anywhere via HTTPS
+- **Custom Domains**: Use your own domain names instead of IP addresses
+- **SSL Management**: SSL certificates configured locally for domain-based routing
+- **Flexible Port Configuration**: Change HTTP/HTTPS ports to avoid conflicts with FRP
+
+### Quick Setup
+
+1. **Configure Ports**: Modify `docker-compose.yml` to use non-standard ports:
+
+   ```yaml
+   environment:
+     - SSL_NGINX_HTTP_PORT=9980 # HTTP traffic
+     - SSL_NGINX_HTTPS_PORT=9943 # HTTPS traffic
+   ```
+
+2. **Setup FRP Client**: Create `frpc.toml`:
+
+   ```toml
+   serverAddr = "your-frp-server.com"
+   serverPort = 7000
+   auth.method = "token"
+   auth.token = "your-secure-token"
+
+   # HTTPS proxy - handles SSL/TLS traffic
+   [[proxies]]
+   name = "sslly-nginx-https"
+   type = "https"
+   localIP = "127.0.0.1"
+   localPort = 9943
+   customDomains = ["*.yourdomain.com", "yourdomain.com"]
+
+   # HTTP proxy - handles plain HTTP and auto-redirects
+   [[proxies]]
+   name = "sslly-nginx-http"
+   type = "http"
+   localIP = "127.0.0.1"
+   localPort = 9980
+   customDomains = ["*.yourdomain.com", "yourdomain.com"]
+   ```
+
+3. **Start Services**: Run both FRP client and sslly-nginx
+
+For detailed FRP integration guide, see [docs/FRP.md](docs/FRP.md).
+
 ## Development
 
 ### Build Locally
@@ -284,10 +326,27 @@ The `docker-compose.yml` is configured with:
   - `./configs:/app/configs:ro` - Configuration (read-only)
   - `./ssl:/app/ssl:ro` - SSL certificates (read-only)
 
-Environment variables
+### Environment Variables
 
 - `SSL_NGINX_HTTP_PORT` (default: `80`) — port Nginx listens for HTTP and redirect to HTTPS
 - `SSL_NGINX_HTTPS_PORT` (default: `443`) — port Nginx listens for HTTPS
+
+### Viewing Logs
+
+All logs (application + nginx access/error logs) are forwarded to Docker's log collector:
+
+```bash
+# View all logs
+docker-compose logs -f
+
+# View only application logs
+docker-compose logs -f sslly-nginx
+
+# View last 100 lines
+docker-compose logs --tail=100 sslly-nginx
+```
+
+Nginx access and error logs are automatically forwarded to stdout/stderr and visible via `docker logs`
 
 ## Project Structure
 
