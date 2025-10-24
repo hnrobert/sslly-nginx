@@ -315,10 +315,27 @@ The `docker-compose.yml` is configured with:
   - `./configs:/app/configs:ro` - Configuration (read-only)
   - `./ssl:/app/ssl:ro` - SSL certificates (read-only)
 
-Environment variables
+### Environment Variables
 
 - `SSL_NGINX_HTTP_PORT` (default: `80`) — port Nginx listens for HTTP and redirect to HTTPS
 - `SSL_NGINX_HTTPS_PORT` (default: `443`) — port Nginx listens for HTTPS
+
+### Viewing Logs
+
+All logs (application + nginx access/error logs) are forwarded to Docker's log collector:
+
+```bash
+# View all logs
+docker-compose logs -f
+
+# View only application logs
+docker-compose logs -f sslly-nginx
+
+# View last 100 lines
+docker-compose logs --tail=100 sslly-nginx
+```
+
+Nginx access and error logs are automatically forwarded to stdout/stderr and visible via `docker logs`
 
 ## Project Structure
 

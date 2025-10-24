@@ -31,6 +31,11 @@ RUN openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
     -out /etc/nginx/ssl/dummy.crt \
     -subj "/C=US/ST=State/L=City/O=Organization/CN=dummy"
 
+# Forward nginx logs to Docker log collector
+# This allows nginx access and error logs to be visible via 'docker logs'
+RUN ln -sf /dev/stdout /var/log/nginx/access.log \
+    && ln -sf /dev/stderr /var/log/nginx/error.log
+
 # Set working directory
 WORKDIR /app
 

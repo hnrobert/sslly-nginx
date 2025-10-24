@@ -45,6 +45,8 @@ docker-compose up -d
 
 ### 4. Check Logs
 
+View all logs (application + nginx access/error logs):
+
 ```bash
 docker-compose logs -f
 ```
@@ -57,7 +59,10 @@ Found certificate for domain: example.com
 Found certificate for domain: api.example.com
 Nginx configuration generated successfully
 Application started successfully
+# Nginx access logs will also appear here
 ```
+
+**Note**: Both application logs and nginx logs (access.log + error.log) are forwarded to Docker logs for easy monitoring.
 
 ## What It Does
 
