@@ -18,7 +18,6 @@ Edit `configs/config.yaml`:
   - example.com
 5678:
   - api.example.com
-
 # Proxy to another machine (optional)
 # 192.168.31.6:8080:
 #   - lan.example.com

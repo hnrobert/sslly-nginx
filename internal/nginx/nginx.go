@@ -198,7 +198,7 @@ http {
 		// Parse the upstream (could be "port" or "ip:port")
 		upstream := config.ParseUpstream(portKey)
 		upstreamAddr := fmt.Sprintf("%s:%s", upstream.Host, upstream.Port)
-		
+
 		for _, domain := range domains {
 			cert, ok := certMap[domain]
 			if !ok {

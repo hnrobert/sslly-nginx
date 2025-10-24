@@ -26,7 +26,7 @@ type Config struct {
 func ParseUpstream(key string) Upstream {
 	// Remove trailing colon if present (for YAML keys like "192.168.31.6:1234:")
 	key = strings.TrimSuffix(key, ":")
-	
+
 	// Handle IPv6 format [host]:port
 	if strings.HasPrefix(key, "[") {
 		closeBracket := strings.Index(key, "]")
@@ -37,14 +37,14 @@ func ParseUpstream(key string) Upstream {
 			}
 		}
 	}
-	
+
 	// Check if key contains a colon (IP:port format)
 	if strings.Contains(key, ":") {
 		// Use LastIndex to handle cases like "::1:9000" (split from the last colon)
 		lastColon := strings.LastIndex(key, ":")
 		host := key[:lastColon]
 		port := key[lastColon+1:]
-		
+
 		// If host part is empty or port part contains colon, it's likely plain port or invalid
 		// Examples: ":8080" should be treated as port 8080, "::1:9000" needs special handling
 		if host == "" || strings.Contains(port, ":") {
@@ -64,14 +64,14 @@ func ParseUpstream(key string) Upstream {
 				}
 			}
 		}
-		
+
 		// Valid host:port format
 		return Upstream{
 			Host: host,
 			Port: port,
 		}
 	}
-	
+
 	// Plain port format (default to localhost)
 	return Upstream{
 		Host: "127.0.0.1",

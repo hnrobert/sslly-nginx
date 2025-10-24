@@ -22,7 +22,6 @@
 # Example 3: Proxy to a named host
 remote-server:8080:
   - remote.example.com
-
 # Example 4: Proxy to IPv6 address (use brackets)
 # [2001:db8::1]:3000:
 #   - ipv6.example.com
