@@ -11,6 +11,7 @@ A smart Nginx SSL reverse proxy manager that automatically configures SSL certif
 - 🔁 **Hot Reload**: Updates Nginx configuration without downtime when files change
 - 🛡️ **Error Recovery**: Maintains the last working configuration and rolls back on failures
 - 🐳 **Docker Ready**: Runs as a containerized service with Docker Compose
+- 🌐 **FRP Integration**: Easy integration with FRP for secure remote access to local services
 - 🚀 **CI/CD Pipeline**: Includes GitHub Actions workflows for testing, building, and releasing
 
 ## How It Works
@@ -25,7 +26,7 @@ A smart Nginx SSL reverse proxy manager that automatically configures SSL certif
 
 ## Quick Start
 
-For a complete quick start guide with one-command setup, see [QUICKSTART.md](QUICKSTART.md).
+For a complete quick start guide with one-command setup, see [docs/QUICKSTART.md](docs/QUICKSTART.md).
 
 ### Prerequisites
 
@@ -56,7 +57,7 @@ For a complete quick start guide with one-command setup, see [QUICKSTART.md](QUI
    docker-compose up -d
    ```
 
-For detailed setup instructions, configuration examples, and troubleshooting, see [QUICKSTART.md](QUICKSTART.md).
+For detailed setup instructions, configuration examples, and troubleshooting, see [docs/quickstart.md](docs/quickstart.md).
 
 ## Configuration
 
@@ -222,6 +223,52 @@ These settings work well with applications like:
 - Home Assistant (Smart home)
 - OnlineJudge (Competitive programming)
 - And most other web applications
+
+## FRP Integration
+
+`sslly-nginx` integrates seamlessly with [FRP (Fast Reverse Proxy)](https://github.com/fatedier/frp) to expose your local services through remote servers, enabling secure remote access to your applications from anywhere.
+
+### Key Benefits
+
+- **Secure Remote Access**: Access local applications from anywhere via HTTPS
+- **Custom Domains**: Use your own domain names instead of IP addresses
+- **SSL Termination**: Handle SSL certificates centrally while proxying to local services
+- **Flexible Port Configuration**: Change HTTP/HTTPS ports to avoid conflicts with FRP
+
+### Quick Setup
+
+1. **Configure Ports**: Modify `docker-compose.yml` to use non-standard ports:
+
+   ```yaml
+   environment:
+     - SSL_NGINX_HTTP_PORT=8080 # Instead of 80
+     - SSL_NGINX_HTTPS_PORT=8443 # Instead of 443
+   ```
+
+2. **Setup FRP Client**: Create `frpc.toml`:
+
+   ```toml
+   serverAddr = "your-frp-server.com"
+   serverPort = 7000
+
+   [[proxies]]
+   name = "sslly-nginx-http"
+   type = "tcp"
+   localIP = "127.0.0.1"
+   localPort = 8080
+   remotePort = 80
+
+   [[proxies]]
+   name = "sslly-nginx-https"
+   type = "tcp"
+   localIP = "127.0.0.1"
+   localPort = 8443
+   remotePort = 443
+   ```
+
+3. **Start Services**: Run both FRP client and sslly-nginx
+
+For detailed FRP integration guide, see [docs/FRP.md](docs/FRP.md).
 
 ## Development
 

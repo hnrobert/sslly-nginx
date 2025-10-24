@@ -69,3 +69,42 @@ docker-compose logs -f
 ```bash
 docker-compose down
 ```
+
+## FRP Integration
+
+For secure remote access to your local services, you can integrate `sslly-nginx` with FRP (Fast Reverse Proxy). This allows you to expose your applications through a remote server.
+
+### Basic FRP Setup
+
+1. **Change Ports** (to avoid conflicts): Edit `docker-compose.yml`:
+
+   ```yaml
+   environment:
+     - SSL_NGINX_HTTP_PORT=8080
+     - SSL_NGINX_HTTPS_PORT=8443
+   ```
+
+2. **Configure FRP Client**: Create `frpc.toml`:
+
+   ```toml
+   serverAddr = "your-frp-server.com"
+   serverPort = 7000
+
+   [[proxies]]
+   name = "sslly-nginx-http"
+   type = "tcp"
+   localIP = "127.0.0.1"
+   localPort = 8080
+   remotePort = 80
+
+   [[proxies]]
+   name = "sslly-nginx-https"
+   type = "tcp"
+   localIP = "127.0.0.1"
+   localPort = 8443
+   remotePort = 443
+   ```
+
+3. **Start FRP**: Run `frpc -c frpc.toml`
+
+For detailed FRP integration guide, see [FRP.md](FRP.md).
