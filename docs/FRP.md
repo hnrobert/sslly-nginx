@@ -8,7 +8,7 @@ FRP allows you to expose local services behind a NAT or firewall to the internet
 
 - **Secure Remote Access**: Access your local applications from anywhere via HTTPS
 - **Custom Domains**: Use your own domain names instead of IP addresses
-- **SSL Termination**: Handle SSL certificates centrally while proxying to local services
+- **SSL Management**: SSL certificates are configured locally in sslly-nginx for domain-based routing
 - **Load Balancing**: Distribute traffic across multiple local instances
 
 ## Configuration
@@ -21,36 +21,49 @@ Edit your `docker-compose.yml` to use non-standard ports (avoid conflicts with F
 services:
   sslly-nginx:
     environment:
-      - SSL_NGINX_HTTP_PORT=8080 # Change from 80
-      - SSL_NGINX_HTTPS_PORT=8443 # Change from 443
+      - SSL_NGINX_HTTP_PORT=9980 # HTTP traffic port
+      - SSL_NGINX_HTTPS_PORT=9943 # HTTPS traffic port
 ```
 
 ### 2. FRP Client Configuration
 
-Create `frpc.toml` on your local machine:
+Create `frpc.toml` on your local machine. Use HTTP and HTTPS proxy types for automatic protocol-based routing:
 
 ```toml
 serverAddr = "your-frp-server.com"
 serverPort = 7000
 
-[[proxies]]
-name = "sslly-nginx-http"
-type = "tcp"
-localIP = "127.0.0.1"
-localPort = 8080
-remotePort = 80
+# FRP server authentication
+auth.method = "token"
+auth.token = "your-secure-token"
 
+# HTTPS proxy - handles SSL/TLS traffic
 [[proxies]]
 name = "sslly-nginx-https"
-type = "tcp"
+type = "https"
 localIP = "127.0.0.1"
-localPort = 8443
-remotePort = 443
+localPort = 9943
+customDomains = ["*.yourdomain.com", "yourdomain.com"]
+
+# HTTP proxy - handles plain HTTP traffic and redirects
+[[proxies]]
+name = "sslly-nginx-http"
+type = "http"
+localIP = "127.0.0.1"
+localPort = 9980
+customDomains = ["*.yourdomain.com", "yourdomain.com"]
 ```
+
+**Key Benefits of this setup:**
+
+- **Automatic HTTPS Redirect**: FRP handles HTTP to HTTPS redirection at the server level
+- **Protocol-based Routing**: HTTP requests go to port 9980, HTTPS to port 9943
+- **SSL Management**: SSL certificates configured locally in sslly-nginx for domain routing
+- **Domain-based Routing**: All subdomains and the main domain are handled
 
 ### 3. FRP Server Configuration
 
-On your FRP server, ensure these ports are available for forwarding.
+On your FRP server, ensure ports 80 and 443 are available for HTTP/HTTPS forwarding. FRP will handle the encrypted transport between the server and your local machine.
 
 ## Usage Examples
 
@@ -59,12 +72,30 @@ On your FRP server, ensure these ports are available for forwarding.
 Expose your local development environment to clients or team members:
 
 ```yaml
-# configs/config.yaml
+# configs/config.yaml - sslly-nginx configuration
 3000:
   - dev.myapp.com
   - api.dev.myapp.com
 8080:
   - staging.myapp.com
+```
+
+With FRP configuration:
+
+```toml
+[[proxies]]
+name = "dev-https"
+type = "https"
+localIP = "127.0.0.1"
+localPort = 9943
+customDomains = ["*.myapp.com", "myapp.com"]
+
+[[proxies]]
+name = "dev-http"
+type = "http"
+localIP = "127.0.0.1"
+localPort = 9980
+customDomains = ["*.myapp.com", "myapp.com"]
 ```
 
 ### Home Server Access
@@ -115,7 +146,12 @@ If you encounter port conflicts, change the `SSL_NGINX_HTTP_PORT` and `SSL_NGINX
 
 ### SSL Certificate Issues
 
-When using FRP, SSL certificates should be configured for the domain pointing to your FRP server, not the local machine.
+When using FRP with HTTP/HTTPS proxy types, SSL certificates must be configured locally in sslly-nginx:
+
+1. **Local SSL Required**: SSL certificates must be placed in the `ssl/` directory for proper domain-based routing
+2. **FRP Transport**: FRP handles encrypted transport between server and client
+3. **Domain Matching**: sslly-nginx uses local certificates to match and route requests to appropriate backends
+4. **Certificate Management**: Manage certificates locally using your preferred method (Let's Encrypt, self-signed, etc.)
 
 ## Advanced Configuration
 
@@ -127,17 +163,37 @@ For production deployments, consider:
 # Advanced frpc.toml
 serverAddr = "frp.example.com"
 serverPort = 7000
+auth.method = "token"
 auth.token = "your-secure-token"
 
+# Web server dashboard (optional)
+webServer.addr = "0.0.0.0"
+webServer.port = 7500
+webServer.user = "admin"
+webServer.password = "secure-password"
+
+# HTTPS proxy with custom settings
 [[proxies]]
-name = "web-service"
-type = "tcp"
+name = "web-service-https"
+type = "https"
 localIP = "127.0.0.1"
-localPort = 8080
-remotePort = 80
-# Health check
-healthCheck.type = "tcp"
+localPort = 9943
+customDomains = ["*.example.com", "example.com"]
+# Additional security
+transport.useEncryption = true
+transport.useCompression = true
+
+# HTTP proxy with health check
+[[proxies]]
+name = "web-service-http"
+type = "http"
+localIP = "127.0.0.1"
+localPort = 9980
+customDomains = ["*.example.com", "example.com"]
+# Health check for HTTP
+healthCheck.type = "http"
 healthCheck.intervalS = 30
+healthCheck.path = "/health"
 ```
 
 ### Load Balancing

@@ -80,8 +80,8 @@ For secure remote access to your local services, you can integrate `sslly-nginx`
 
    ```yaml
    environment:
-     - SSL_NGINX_HTTP_PORT=8080
-     - SSL_NGINX_HTTPS_PORT=8443
+     - SSL_NGINX_HTTP_PORT=9980
+     - SSL_NGINX_HTTPS_PORT=9943
    ```
 
 2. **Configure FRP Client**: Create `frpc.toml`:
@@ -89,20 +89,24 @@ For secure remote access to your local services, you can integrate `sslly-nginx`
    ```toml
    serverAddr = "your-frp-server.com"
    serverPort = 7000
+   auth.method = "token"
+   auth.token = "your-secure-token"
 
-   [[proxies]]
-   name = "sslly-nginx-http"
-   type = "tcp"
-   localIP = "127.0.0.1"
-   localPort = 8080
-   remotePort = 80
-
+   # HTTPS proxy - handles SSL/TLS traffic
    [[proxies]]
    name = "sslly-nginx-https"
-   type = "tcp"
+   type = "https"
    localIP = "127.0.0.1"
-   localPort = 8443
-   remotePort = 443
+   localPort = 9943
+   customDomains = ["*.yourdomain.com", "yourdomain.com"]
+
+   # HTTP proxy - handles plain HTTP and auto-redirects
+   [[proxies]]
+   name = "sslly-nginx-http"
+   type = "http"
+   localIP = "127.0.0.1"
+   localPort = 9980
+   customDomains = ["*.yourdomain.com", "yourdomain.com"]
    ```
 
 3. **Start FRP**: Run `frpc -c frpc.toml`

@@ -18,6 +18,7 @@
         "pipefail",
         "softprops",
         "sslly",
-        "subj"
+        "subj",
+        "yourdomain"
     ]
 }

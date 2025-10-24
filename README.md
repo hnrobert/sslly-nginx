@@ -230,9 +230,9 @@ These settings work well with applications like:
 
 ### Key Benefits
 
-- **Secure Remote Access**: Access local applications from anywhere via HTTPS
+- **Secure Remote Access**: Access your local applications from anywhere via HTTPS
 - **Custom Domains**: Use your own domain names instead of IP addresses
-- **SSL Termination**: Handle SSL certificates centrally while proxying to local services
+- **SSL Management**: SSL certificates configured locally for domain-based routing
 - **Flexible Port Configuration**: Change HTTP/HTTPS ports to avoid conflicts with FRP
 
 ### Quick Setup
@@ -241,8 +241,8 @@ These settings work well with applications like:
 
    ```yaml
    environment:
-     - SSL_NGINX_HTTP_PORT=8080 # Instead of 80
-     - SSL_NGINX_HTTPS_PORT=8443 # Instead of 443
+     - SSL_NGINX_HTTP_PORT=9980 # HTTP traffic
+     - SSL_NGINX_HTTPS_PORT=9943 # HTTPS traffic
    ```
 
 2. **Setup FRP Client**: Create `frpc.toml`:
@@ -250,20 +250,24 @@ These settings work well with applications like:
    ```toml
    serverAddr = "your-frp-server.com"
    serverPort = 7000
+   auth.method = "token"
+   auth.token = "your-secure-token"
 
-   [[proxies]]
-   name = "sslly-nginx-http"
-   type = "tcp"
-   localIP = "127.0.0.1"
-   localPort = 8080
-   remotePort = 80
-
+   # HTTPS proxy - handles SSL/TLS traffic
    [[proxies]]
    name = "sslly-nginx-https"
-   type = "tcp"
+   type = "https"
    localIP = "127.0.0.1"
-   localPort = 8443
-   remotePort = 443
+   localPort = 9943
+   customDomains = ["*.yourdomain.com", "yourdomain.com"]
+
+   # HTTP proxy - handles plain HTTP and auto-redirects
+   [[proxies]]
+   name = "sslly-nginx-http"
+   type = "http"
+   localIP = "127.0.0.1"
+   localPort = 9980
+   customDomains = ["*.yourdomain.com", "yourdomain.com"]
    ```
 
 3. **Start Services**: Run both FRP client and sslly-nginx
