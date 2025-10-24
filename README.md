@@ -25,13 +25,15 @@ A smart Nginx SSL reverse proxy manager that automatically configures SSL certif
 
 ## Quick Start
 
+For a complete quick start guide with one-command setup, see [QUICKSTART.md](QUICKSTART.md).
+
 ### Prerequisites
 
 - Docker and Docker Compose
 - SSL certificates for your domains (optional - service can run in HTTP-only mode)
 - Running applications on local ports
 
-### Installation
+### Basic Setup
 
 1. Clone the repository:
 
@@ -40,32 +42,21 @@ A smart Nginx SSL reverse proxy manager that automatically configures SSL certif
    cd sslly-nginx
    ```
 
-2. Create configuration file:
+2. Copy the example configuration:
 
    ```bash
    cp configs/config.example.yaml configs/config.yaml
    ```
 
-3. Edit `configs/config.yaml` with your port-to-domain mappings:
+3. Edit `configs/config.yaml` with your port-to-domain mappings
 
-   ```yaml
-   1234:
-     - a.com
-     - b.a.com
-   5678:
-     - b.com
-   ```
-
-4. (Optional) Add your SSL certificates to the `ssl/` directory (see [SSL Certificate Structure](#ssl-certificate-structure))
-
-   - If no certificates are provided, the service will run in HTTP-only mode
-   - You can add certificates later and the service will automatically reload
-
-5. Start the service:
+4. Start the service:
 
    ```bash
    docker-compose up -d
    ```
+
+For detailed setup instructions, configuration examples, and troubleshooting, see [QUICKSTART.md](QUICKSTART.md).
 
 ## Configuration
 

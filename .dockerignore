@@ -9,8 +9,7 @@
 README.md
 LICENSE
 
-# Configuration and SSL (will be mounted as volumes)
-configs/
+# SSL (will be mounted as volumes)
 ssl/
 
 # Build artifacts

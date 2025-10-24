@@ -25,6 +25,9 @@ COPY --from=builder /build/sslly-nginx /app/sslly-nginx
 # Create necessary directories
 RUN mkdir -p /app/configs /app/ssl /etc/nginx/ssl
 
+# Copy default configuration
+COPY configs/config.example.yaml /app/configs/config.yaml
+
 # Generate a dummy self-signed certificate for default HTTPS server
 RUN openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
     -keyout /etc/nginx/ssl/dummy.key \

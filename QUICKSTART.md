@@ -1,154 +1,71 @@
 # Quick Start Guide
 
-## Setup and Run in 5 Minutes
+## 🚀 One-Command Setup
 
-### 1. Prepare Configuration
-
-Create your configuration file:
+Get started in seconds with default configuration:
 
 ```bash
-cp configs/config.example.yaml configs/config.yaml
+# Download Docker Compose configuration
+curl -fsSL https://raw.githubusercontent.com/hnrobert/sslly-nginx/main/docker-compose.yml -o docker-compose.yml
+
+# Start the service
+docker-compose up -d
 ```
 
-Edit `configs/config.yaml`:
+That's it! The service will start with default configuration and create necessary directories locally.
+
+## What Happens
+
+- **Default Configuration**: Maps incoming hostnames to backend addresses. By default:
+
+  - `a.com` & `b.a.com` → `localhost:1234`
+  - `b.com` → `localhost:5678`
+  - `lan.example.com` → `192.168.31.6:1234`
+  - `remote.example.com` → `remote-server:8080`
+
+- **Local Directories**: Creates `configs/`, `ssl/`, and `nginx/` directories in your current directory
+- **Hot Reload**: Automatically reloads when you modify configuration or add SSL certificates
+- **Ports**: Listens on HTTP (80) and HTTPS (443) using host networking
+
+## Customize Configuration
+
+Edit `configs/config.yaml` to change or add routes and meeting your requirements. Format Options:
 
 ```yaml
-# Proxy to localhost
-1234:
-  - example.com
-5678:
-  - api.example.com
-# Proxy to another machine (optional)
-# 192.168.31.6:8080:
-#   - lan.example.com
+# Format Options:
+# 1. port: [domains]           - Proxies to localhost:port (127.0.0.1:port)
+# 2. ip:port: [domains]        - Proxies to specified ip:port
+# 3. hostname:port: [domains]  - Proxies to specified hostname:port
+# 4. [ipv6]:port: [domains]    - Proxies to IPv6 address (add brackets)
 ```
 
-### 2. Add SSL Certificates (Optional)
+## Add SSL Certificates
 
-Add your SSL certificates to the `ssl/` directory:
+Drop certificate files into the `ssl/` directory:
 
-```bash
+```text
 ssl/
 ├── example.com.crt
 ├── example.com.key
-├── api.example.com_bundle.crt
-└── api.example.com_bundle.key
+└── api.example.com_bundle.crt
 ```
 
-**Note**: SSL certificates are optional. If you skip this step, the service will run in HTTP-only mode. You can add certificates later and the service will automatically reload.
+**Note**: Certificate files are automatically detected and hot-reloaded. No restart required!
 
-### 3. Start the Service
+## ⚠️ Important Notes
 
-```bash
-docker-compose up -d
-```
+- The `nginx/nginx.conf` file is **auto-generated** and will be **overwritten** on configuration changes. By default it is mounted for your reference.
+- **Do not modify** `nginx/nginx.conf` directly unless you just want some temporary changes for testing
+- SSL certificates are optional - add them anytime for HTTPS support
 
-### 4. Check Logs
-
-View all logs (application + nginx access/error logs):
+## View Logs
 
 ```bash
 docker-compose logs -f
 ```
 
-You should see:
+## Stop Service
 
 ```bash
-Starting sslly-nginx...
-Found certificate for domain: example.com
-Found certificate for domain: api.example.com
-Nginx configuration generated successfully
-Application started successfully
-# Nginx access logs will also appear here
-```
-
-**Note**: Both application logs and nginx logs (access.log + error.log) are forwarded to Docker logs for easy monitoring.
-
-## What It Does
-
-**With SSL Certificates**:
-
-1. **HTTP (Port 80)**: Redirects all traffic to HTTPS
-2. **HTTPS (Port 443)**:
-   - Listens for `example.com` → proxies to `localhost:1234`
-   - Listens for `api.example.com` → proxies to `localhost:5678`
-   - If accessed with invalid/missing certificate → redirects to HTTP (301)
-3. **Hot Reload**: Automatically updates when you change config or certificates
-
-**Without SSL Certificates** (HTTP-only mode):
-
-1. **HTTP (Port 80)**: Proxies traffic directly to your applications
-2. **HTTPS (Port 443)**: Redirects to HTTP (301) to avoid certificate errors
-3. You can add certificates later and service will automatically switch to HTTPS mode
-
-## Customizing Nginx Ports
-
-By default the service listens on HTTP port `80` and HTTPS port `443`. You can override them via Docker Compose environment variables:
-
-- `SSL_NGINX_HTTP_PORT` — default `80`
-- `SSL_NGINX_HTTPS_PORT` — default `443`
-
-Example (`docker-compose.yml` snippet):
-
-```yaml
-services:
-  sslly-nginx:
-    environment:
-      - SSL_NGINX_HTTP_PORT=8080
-      - SSL_NGINX_HTTPS_PORT=8443
-```
-
-## Common Commands
-
-```bash
-# Start
-docker-compose up -d
-
-# Stop
 docker-compose down
-
-# Restart
-docker-compose restart
-
-# View logs
-docker-compose logs -f
-
-# Rebuild
-docker-compose up -d --build
 ```
-
-## Testing Locally (Without Docker)
-
-```bash
-# Build
-make build
-
-# Run (requires nginx installed)
-./sslly-nginx
-```
-
-## Troubleshooting
-
-**Container stops immediately?**
-
-- Check `docker-compose logs`
-- Verify `configs/config.yaml` exists
-- Check for configuration errors in logs
-
-**Certificate not found?**
-
-- This is not an error! The service will run in HTTP-only mode
-- Check filename matches pattern: `domain.crt/key` or `domain_bundle.crt/key`
-- Both `.crt` and `.key` must exist for HTTPS to work
-
-**Port already in use?**
-
-- Service uses host network (ports 80 and 443 by default)
-- Stop other services using these ports or configure custom ports via environment variables
-- Stop other services using these ports
-
-## Next Steps
-
-- Read [README.md](README.md) for detailed documentation
-- See [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md) for architecture details
-- Check [CONTRIBUTING.md](CONTRIBUTING.md) to contribute

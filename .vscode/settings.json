@@ -10,8 +10,11 @@
         "GOOS",
         "installsuffix",
         "Jellyfin",
+        "keyout",
+        "newkey",
         "pipefail",
         "softprops",
-        "sslly"
+        "sslly",
+        "subj"
     ]
 }
