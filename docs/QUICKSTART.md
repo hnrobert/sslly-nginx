@@ -23,7 +23,7 @@ That's it! The service will start with default configuration and create necessar
   - `lan.example.com` → `192.168.31.6:1234`
   - `remote.example.com` → `remote-server:8080`
 
-- **Local Directories**: Creates `configs/`, `ssl/`, and `nginx/` directories in your current directory
+- **Local Directories**: Creates `configs/` and `ssl/` directories in your current directory
 - **Hot Reload**: Automatically reloads when you modify configuration or add SSL certificates
 - **Ports**: Listens on HTTP (80) and HTTPS (443) using host networking
 
@@ -54,8 +54,6 @@ ssl/
 
 ## ⚠️ Important Notes
 
-- The `nginx/nginx.conf` file is **auto-generated** and will be **overwritten** on configuration changes. By default it is mounted for your reference.
-- **Do not modify** `nginx/nginx.conf` directly unless you just want some temporary changes for testing
 - SSL certificates are optional - add them anytime for HTTPS support
 
 ## View Logs
