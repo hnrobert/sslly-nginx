@@ -62,3 +62,67 @@ func TestLoadConfigEmpty(t *testing.T) {
 		t.Error("Expected error when config is empty")
 	}
 }
+
+func TestParseUpstream(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantHost string
+		wantPort string
+	}{
+		{
+			name:     "Plain port number",
+			input:    "1234",
+			wantHost: "127.0.0.1",
+			wantPort: "1234",
+		},
+		{
+			name:     "IP:port format",
+			input:    "192.168.31.6:1234",
+			wantHost: "192.168.31.6",
+			wantPort: "1234",
+		},
+		{
+			name:     "IP:port with trailing colon (YAML key format)",
+			input:    "192.168.31.6:1234:",
+			wantHost: "192.168.31.6",
+			wantPort: "1234",
+		},
+		{
+			name:     "Plain port with trailing colon",
+			input:    "5678:",
+			wantHost: "127.0.0.1",
+			wantPort: "5678",
+		},
+		{
+			name:     "Localhost with port",
+			input:    "localhost:8080",
+			wantHost: "localhost",
+			wantPort: "8080",
+		},
+		{
+			name:     "IPv6 localhost with brackets",
+			input:    "[::1]:9000",
+			wantHost: "::1",
+			wantPort: "9000",
+		},
+		{
+			name:     "IPv6 address with brackets",
+			input:    "[2001:db8::1]:8080",
+			wantHost: "2001:db8::1",
+			wantPort: "8080",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			upstream := ParseUpstream(tt.input)
+			if upstream.Host != tt.wantHost {
+				t.Errorf("ParseUpstream(%q).Host = %q, want %q", tt.input, upstream.Host, tt.wantHost)
+			}
+			if upstream.Port != tt.wantPort {
+				t.Errorf("ParseUpstream(%q).Port = %q, want %q", tt.input, upstream.Port, tt.wantPort)
+			}
+		})
+	}
+}

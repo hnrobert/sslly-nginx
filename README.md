@@ -71,10 +71,12 @@ A smart Nginx SSL reverse proxy manager that automatically configures SSL certif
 
 ### Application Configuration
 
-The configuration file (`configs/config.yaml`) maps local ports to domain names:
+The configuration file (`configs/config.yaml`) maps upstream addresses to domain names. It supports multiple formats:
+
+#### Format 1: Port Only (Default to localhost)
 
 ```yaml
-# Format: port: [list of domains]
+# Proxies to 127.0.0.1:port
 1234:
   - example.com
   - www.example.com
@@ -82,8 +84,37 @@ The configuration file (`configs/config.yaml`) maps local ports to domain names:
   - api.example.com
 ```
 
-- **Key**: Local port number where your application is running
-- **Value**: List of domains that should be proxied to this port
+#### Format 2: IP:Port (Proxy to specific IP)
+
+```yaml
+# Proxies to 192.168.31.6:1234
+192.168.31.6:1234:
+  - lan.example.com
+  - local.example.com
+```
+
+#### Format 3: Hostname:Port
+
+```yaml
+# Proxies to remote-server:8080
+remote-server:8080:
+  - remote.example.com
+```
+
+#### Format 4: IPv6 with Brackets
+
+```yaml
+# Proxies to IPv6 address 2001:db8::1 port 3000
+[2001:db8::1]:3000:
+  - ipv6.example.com
+```
+
+**Configuration Key Formats:**
+
+- `port` → Proxies to `127.0.0.1:port` (default)
+- `ip:port` → Proxies to `ip:port`
+- `hostname:port` → Proxies to `hostname:port`
+- `[ipv6]:port` → Proxies to IPv6 address with brackets
 
 ### SSL Certificate Structure
 
