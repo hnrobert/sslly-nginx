@@ -14,7 +14,7 @@ docker-compose up -d
 
 That's it! The service will start with default configuration and create necessary directories locally.
 
-## What Happens
+### What Happens
 
 - **Default Configuration**: Maps incoming hostnames to backend addresses. By default:
 
@@ -27,7 +27,7 @@ That's it! The service will start with default configuration and create necessar
 - **Hot Reload**: Automatically reloads when you modify configuration or add SSL certificates
 - **Ports**: Listens on HTTP (80) and HTTPS (443) using host networking
 
-## Customize Configuration
+### Customize Configuration
 
 Edit `configs/config.yaml` to change or add routes and meeting your requirements. Format Options:
 
@@ -39,7 +39,7 @@ Edit `configs/config.yaml` to change or add routes and meeting your requirements
 # 4. [ipv6]:port: [domains]    - Proxies to IPv6 address (add brackets)
 ```
 
-## Add SSL Certificates
+### Add SSL Certificates
 
 Drop certificate files into the `ssl/` directory:
 
@@ -51,6 +51,30 @@ ssl/
 ```
 
 **Note**: Certificate files are automatically detected and hot-reloaded. No restart required!
+
+## Local Build & Setup Instructions
+
+1. Clone the repository:
+
+   ```bash
+   git clone https://github.com/hnrobert/sslly-nginx.git
+   cd sslly-nginx
+   ```
+
+2. Copy the example configuration:
+
+   ```bash
+   cp configs/config.example.yaml configs/config.yaml
+   ```
+
+3. Edit `configs/config.yaml` with your port-to-domain mappings
+
+4. Build and Start the service:
+
+   ```bash
+   docker build -t ghcr.io/hnrobert/sslly-nginx:latest .
+   docker-compose up -d
+   ```
 
 ## ⚠️ Important Notes
 
