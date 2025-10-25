@@ -229,10 +229,19 @@ http {
             proxy_send_timeout 60s;
             proxy_read_timeout 60s;
 
-            # CORS headers
+            # CORS configuration
             add_header 'Access-Control-Allow-Origin' '*' always;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, DELETE' always;
-            add_header 'Access-Control-Allow-Headers' 'Origin, Content-Type, Accept, Authorization' always;
+            add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range' always;
+            add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;
+
+            # Handle OPTIONS preflight requests
+            if ($request_method = 'OPTIONS') {
+                add_header 'Access-Control-Max-Age' 1728000;
+                add_header 'Content-Type' 'text/plain; charset=utf-8';
+                add_header 'Content-Length' 0;
+                return 204;
+            }
         }
     }
 
@@ -276,10 +285,19 @@ http {
             proxy_send_timeout 60s;
             proxy_read_timeout 60s;
 
-            # CORS headers
+            # CORS configuration
             add_header 'Access-Control-Allow-Origin' '*' always;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, DELETE' always;
-            add_header 'Access-Control-Allow-Headers' 'Origin, Content-Type, Accept, Authorization' always;
+            add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range' always;
+            add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;
+
+            # Handle OPTIONS preflight requests
+            if ($request_method = 'OPTIONS') {
+                add_header 'Access-Control-Max-Age' 1728000;
+                add_header 'Content-Type' 'text/plain; charset=utf-8';
+                add_header 'Content-Length' 0;
+                return 204;
+            }
         }
     }
 
