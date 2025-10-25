@@ -156,6 +156,22 @@ http {
     proxy_buffers 8 4k;
     proxy_busy_buffers_size 8k;
 
+    # CORS configuration
+    map $http_origin $cors_origin {
+        default "";
+
+        # 允许的域名
+        ~^https?://.*\.example\.com$      $http_origin;
+        ~^https?://localhost(:\d+)?$      $http_origin;
+        ~^https?://127\.0\.0\.1(:\d+)?$   $http_origin;
+
+        # ✅ 新增：允许 motionvote.ibuduan.com
+        ~^https?://motionvote\.ibuduan\.com$  $http_origin;
+
+        # （可选）如果将来要放行所有 ibuduan.com 子域：
+        # ~^https?://.*\.ibuduan\.com$     $http_origin;
+    }
+
 `)
 
 	if hasAnyCerts {
@@ -230,10 +246,10 @@ http {
             proxy_read_timeout 60s;
 
             # CORS configuration
-            add_header 'Access-Control-Allow-Origin' '*' always;
+            add_header 'Access-Control-Allow-Origin' $cors_origin;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, DELETE' always;
-            add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range' always;
-            add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;
+            add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+            add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range';
 
             # Handle OPTIONS preflight requests
             if ($request_method = 'OPTIONS') {
@@ -286,10 +302,10 @@ http {
             proxy_read_timeout 60s;
 
             # CORS configuration
-            add_header 'Access-Control-Allow-Origin' '*' always;
+            add_header 'Access-Control-Allow-Origin' $cors_origin;
             add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, DELETE' always;
-            add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range' always;
-            add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;
+            add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range';
+            add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range';
 
             # Handle OPTIONS preflight requests
             if ($request_method = 'OPTIONS') {
