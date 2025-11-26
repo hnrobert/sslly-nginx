@@ -28,13 +28,37 @@ A smart Nginx SSL reverse proxy manager that automatically configures SSL certif
 
 For a quick start & deployment guide, see [docs/QUICKSTART.md](docs/QUICKSTART.md).
 
+## Documentation
+
+- [Quick Start Guide](docs/QUICKSTART.md) - Get started with installation and deployment
+- [CORS Configuration](docs/CORS.md) - Comprehensive CORS setup and best practices
+- [FRP Integration](docs/FRP.md) - Set up FRP for remote access to local services
+
 ## Configuration
 
 ### Application Configuration
 
-The configuration file (`configs/config.yaml`) maps upstream addresses to domain names. It supports multiple formats:
+The configuration file (`configs/config.yaml`) maps upstream addresses to domain names. It supports multiple formats and advanced features.
 
-#### Format 1: Port Only (Default to localhost)
+#### CORS Configuration (Optional)
+
+Configure CORS (Cross-Origin Resource Sharing) settings globally or per-domain.
+
+```yaml
+# You can also configure CORS for specific domains:
+cors:
+  "api.example.com":
+    allow_origin: "https://app.example.com"
+    allow_methods: [GET, POST, PUT, DELETE, OPTIONS]
+    allow_headers: [Content-Type, Authorization]
+    allow_credentials: true
+```
+
+For more please check [CORS Configuration](docs/CORS.md) for comprehensive CORS setup guide and best practices examples
+
+#### Basic Port Mapping Formats
+
+##### Format 1: Port Only (Default to localhost)
 
 ```yaml
 # Proxies to 127.0.0.1:port
@@ -45,7 +69,7 @@ The configuration file (`configs/config.yaml`) maps upstream addresses to domain
   - api.example.com
 ```
 
-#### Format 2: IP:Port (Proxy to specific IP)
+##### Format 2: IP:Port (Proxy to specific IP)
 
 ```yaml
 # Proxies to 192.168.31.6:1234
@@ -54,28 +78,49 @@ The configuration file (`configs/config.yaml`) maps upstream addresses to domain
   - local.example.com
 ```
 
-#### Format 3: Hostname:Port
+##### Format 3: Hostname:Port
 
 ```yaml
-# Proxies to remote-server:8080
-remote-server:8080:
+# Proxies to example-server.local:8080
+example-server.local:8080:
   - remote.example.com
 ```
 
-#### Format 4: IPv6 with Brackets
+##### Format 4: IPv6 with Brackets
 
 ```yaml
 # Proxies to IPv6 address 2001:db8::1 port 3000
-[2001:db8::1]:3000:
+'[2001:db8::1]:3000':
   - ipv6.example.com
 ```
 
-**Configuration Key Formats:**
+#### Advanced: Path-based Routing
+
+Route different paths of the same domain to different backends:
+
+```yaml
+# Main site on port 9012
+9012:
+  - shared.example.com
+
+# API endpoints on different server
+192.168.50.2:5678/api:
+  - shared.example.com/api
+```
+
+This generates Nginx configuration with location-based routing:
+
+- `shared.example.com/api` → `192.168.50.2:5678/api`
+- `shared.example.com/` → `127.0.0.1:9012`
+
+**Configuration Key Formats Summary:**
 
 - `port` → Proxies to `127.0.0.1:port` (default)
 - `ip:port` → Proxies to `ip:port`
 - `hostname:port` → Proxies to `hostname:port`
 - `[ipv6]:port` → Proxies to IPv6 address with brackets
+- `upstream/path` → Adds path routing to the upstream
+  - Example: `192.168.50.2:5678/api` proxies `/api` requests to that backend
 
 ### SSL Certificate Structure
 

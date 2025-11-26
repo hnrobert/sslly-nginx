@@ -1,6 +1,60 @@
 # Example configuration file for sslly-nginx
 # Copy this file to config.yaml and modify according to your needs
 
+# CORS Settings (Optional)
+# Configure Cross-Origin Resource Sharing for your domains
+cors:
+  "*": # Wildcard applies to all domains (can also specify individual domains)
+    # Origin to allow (use "*" for all origins, or specific origin like "https://example.com")
+    allow_origin: "*"
+
+    # HTTP methods allowed for CORS requests
+    # Default (if not specified): All methods (GET, HEAD, POST, PUT, DELETE, CONNECT, OPTIONS, TRACE, PATCH)
+    allow_methods:
+      - GET
+      - HEAD
+      - POST
+      - PUT
+      - DELETE
+      - CONNECT
+      - OPTIONS
+      - TRACE
+      - PATCH
+
+    # Headers that can be used in the actual request
+    allow_headers:
+      - DNT
+      - User-Agent
+      - X-Requested-With
+      - If-Modified-Since
+      - Cache-Control
+      - Content-Type
+      - Range
+      - Authorization
+
+    # Headers exposed to the browser
+    expose_headers:
+      - Content-Length
+      - Content-Range
+
+    # How long (in seconds) the preflight response can be cached
+    # Default: 1728000 (20 days)
+    max_age: 1728000
+
+    # Whether to allow credentials (cookies, authorization headers, etc.)
+    # Default: false
+    # Note: If true, allow_origin cannot be "*"
+    allow_credentials: false
+
+# You can also configure CORS for specific domains:
+# cors:
+#   "api.example.com":
+#     allow_origin: "https://app.example.com"
+#     allow_methods: [GET, POST, PUT, DELETE, OPTIONS]
+#     allow_headers: [Content-Type, Authorization]
+#     allow_credentials: true
+
+# Proxy Mapping Configuration
 # Format Options:
 # 1. port: [domains]           - Proxies to localhost:port (127.0.0.1:port)
 # 2. ip:port: [domains]        - Proxies to specified ip:port
@@ -9,19 +63,27 @@
 
 # Example 1: Proxy to localhost (default)
 1234:
-  - a.com
-  - b.a.com
+  - example.com
+  - child.example.com
 
 5678:
-  - b.com
+  - example2.com
 
 # Example 2: Proxy to another machine on LAN
-192.168.31.6:1234:
+192.168.50.2:1234:
   - lan.example.com
 
 # Example 3: Proxy to a named host
-remote-server:8080:
+example-server.local:8080:
   - remote.example.com
-# Example 4: Proxy to IPv6 address (use brackets)
-# [2001:db8::1]:3000:
-#   - ipv6.example.com
+
+# Example 4: Proxy to IPv6 address (use "[ipv6:with:brackets]:port")
+"[2001:db8::1]:3000":
+  - ipv6.example.com
+
+# Example 5: Shared Domain with different routes
+9012:
+  - shared.example.com
+
+192.168.50.2:5678/api:
+  - shared.example.com/api

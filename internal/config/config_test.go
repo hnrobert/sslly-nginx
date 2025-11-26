@@ -69,48 +69,84 @@ func TestParseUpstream(t *testing.T) {
 		input    string
 		wantHost string
 		wantPort string
+		wantPath string
 	}{
 		{
 			name:     "Plain port number",
 			input:    "1234",
 			wantHost: "127.0.0.1",
 			wantPort: "1234",
+			wantPath: "",
 		},
 		{
 			name:     "IP:port format",
 			input:    "192.168.31.6:1234",
 			wantHost: "192.168.31.6",
 			wantPort: "1234",
+			wantPath: "",
 		},
 		{
 			name:     "IP:port with trailing colon (YAML key format)",
 			input:    "192.168.31.6:1234:",
 			wantHost: "192.168.31.6",
 			wantPort: "1234",
+			wantPath: "",
 		},
 		{
 			name:     "Plain port with trailing colon",
 			input:    "5678:",
 			wantHost: "127.0.0.1",
 			wantPort: "5678",
+			wantPath: "",
 		},
 		{
 			name:     "Localhost with port",
 			input:    "localhost:8080",
 			wantHost: "localhost",
 			wantPort: "8080",
+			wantPath: "",
 		},
 		{
 			name:     "IPv6 localhost with brackets",
 			input:    "[::1]:9000",
 			wantHost: "::1",
 			wantPort: "9000",
+			wantPath: "",
 		},
 		{
 			name:     "IPv6 address with brackets",
 			input:    "[2001:db8::1]:8080",
 			wantHost: "2001:db8::1",
 			wantPort: "8080",
+			wantPath: "",
+		},
+		{
+			name:     "Hostname with port",
+			input:    "example-server.local:8080",
+			wantHost: "example-server.local",
+			wantPort: "8080",
+			wantPath: "",
+		},
+		{
+			name:     "IP:port with path",
+			input:    "192.168.50.2:5678/api",
+			wantHost: "192.168.50.2",
+			wantPort: "5678",
+			wantPath: "/api",
+		},
+		{
+			name:     "Plain port with path",
+			input:    "9012/admin",
+			wantHost: "127.0.0.1",
+			wantPort: "9012",
+			wantPath: "/admin",
+		},
+		{
+			name:     "IPv6 with path",
+			input:    "[2001:db8::1]:3000/api/v1",
+			wantHost: "2001:db8::1",
+			wantPort: "3000",
+			wantPath: "/api/v1",
 		},
 	}
 
@@ -123,6 +159,79 @@ func TestParseUpstream(t *testing.T) {
 			if upstream.Port != tt.wantPort {
 				t.Errorf("ParseUpstream(%q).Port = %q, want %q", tt.input, upstream.Port, tt.wantPort)
 			}
+			if upstream.Path != tt.wantPath {
+				t.Errorf("ParseUpstream(%q).Path = %q, want %q", tt.input, upstream.Path, tt.wantPath)
+			}
 		})
+	}
+}
+
+func TestLoadConfigWithCORS(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	configContent := `cors:
+  "*":
+    allow_origin: "*"
+    allow_methods:
+      - GET
+      - POST
+      - OPTIONS
+    allow_headers:
+      - Content-Type
+      - Authorization
+    expose_headers:
+      - Content-Length
+    max_age: 3600
+    allow_credentials: false
+
+1234:
+  - example.com
+`
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("Failed to write test config: %v", err)
+	}
+
+	cfg, err := Load(tmpDir)
+	if err != nil {
+		t.Fatalf("Failed to load config: %v", err)
+	}
+
+	// Check CORS config loaded
+	if len(cfg.CORS) != 1 {
+		t.Errorf("Expected 1 CORS config, got %d", len(cfg.CORS))
+	}
+
+	if corsConfig, ok := cfg.CORS["*"]; ok {
+		if len(corsConfig.AllowMethods) != 3 {
+			t.Errorf("Expected 3 CORS methods, got %d", len(corsConfig.AllowMethods))
+		}
+		if corsConfig.AllowOrigin != "*" {
+			t.Errorf("Expected allow_origin '*', got %s", corsConfig.AllowOrigin)
+		}
+		if len(corsConfig.AllowHeaders) != 2 {
+			t.Errorf("Expected 2 allow headers, got %d", len(corsConfig.AllowHeaders))
+		}
+		if len(corsConfig.ExposeHeaders) != 1 {
+			t.Errorf("Expected 1 expose header, got %d", len(corsConfig.ExposeHeaders))
+		}
+		if corsConfig.MaxAge != 3600 {
+			t.Errorf("Expected max_age 3600, got %d", corsConfig.MaxAge)
+		}
+		if corsConfig.AllowCredentials != false {
+			t.Errorf("Expected allow_credentials false, got %v", corsConfig.AllowCredentials)
+		}
+	} else {
+		t.Error("Wildcard CORS config not found")
+	}
+
+	// Ensure "cors" is not in Ports map
+	if _, exists := cfg.Ports["cors"]; exists {
+		t.Error("'cors' should not appear in Ports map")
+	}
+
+	// Check regular port mapping still works
+	if len(cfg.Ports) != 1 {
+		t.Errorf("Expected 1 port mapping, got %d", len(cfg.Ports))
 	}
 }
