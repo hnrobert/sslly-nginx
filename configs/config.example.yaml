@@ -56,10 +56,11 @@ cors:
 
 # Proxy Mapping Configuration
 # Format Options:
-# 1. port: [domains]           - Proxies to localhost:port (127.0.0.1:port)
-# 2. ip:port: [domains]        - Proxies to specified ip:port
-# 3. hostname:port: [domains]  - Proxies to specified hostname:port
-# 4. [ipv6]:port: [domains]    - Proxies to IPv6 address with brackets
+# 1. port: [domains]              - Proxies to localhost:port (127.0.0.1:port) via HTTP
+# 2. ip:port: [domains]           - Proxies to specified ip:port via HTTP
+# 3. hostname:port: [domains]     - Proxies to specified hostname:port via HTTP
+# 4. [ipv6]:port: [domains]       - Proxies to IPv6 address with brackets via HTTP
+# 5. [https]upstream: [domains]   - Proxies to upstream via HTTPS (prevents "plain HTTP to HTTPS port" errors)
 
 # Example 1: Proxy to localhost (default)
 1234:
@@ -81,7 +82,12 @@ example-server.local:8080:
 "[2001:db8::1]:3000":
   - ipv6.example.com
 
-# Example 5: Shared Domain with different routes
+# Example 5: Proxy to HTTPS backend (use [https] prefix)
+# This prevents "400 Bad Request - The plain HTTP request was sent to HTTPS port" errors
+"[https]192.168.50.2:8443":
+  - secure-backend.example.com
+
+# Example 6: Shared Domain with different routes
 9012:
   - shared.example.com
 

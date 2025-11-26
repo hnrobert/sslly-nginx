@@ -21,9 +21,10 @@ type CORSConfig struct {
 
 // Upstream represents a backend server configuration
 type Upstream struct {
-	Host string // IP address or hostname (default: 127.0.0.1)
-	Port string // Port number
-	Path string // Optional path prefix for routing
+	Scheme string // Protocol scheme: "http" or "https" (default: "http")
+	Host   string // IP address or hostname (default: 127.0.0.1)
+	Port   string // Port number
+	Path   string // Optional path prefix for routing
 }
 
 type Config struct {
@@ -32,14 +33,22 @@ type Config struct {
 }
 
 // ParseUpstream parses the key format which can be:
-// - "1234" -> Upstream{Host: "127.0.0.1", Port: "1234", Path: ""}
-// - "192.168.31.6:1234" -> Upstream{Host: "192.168.31.6", Port: "1234", Path: ""}
-// - "192.168.31.6:1234/api" -> Upstream{Host: "192.168.31.6", Port: "1234", Path: "/api"}
-// - "[::1]:9000" -> Upstream{Host: "::1", Port: "9000", Path: ""} (IPv6 format)
-// - "example-server.local:8080" -> Upstream{Host: "example-server.local", Port: "8080", Path: ""}
+// - "1234" -> Upstream{Scheme: "http", Host: "127.0.0.1", Port: "1234", Path: ""}
+// - "192.168.31.6:1234" -> Upstream{Scheme: "http", Host: "192.168.31.6", Port: "1234", Path: ""}
+// - "192.168.31.6:1234/api" -> Upstream{Scheme: "http", Host: "192.168.31.6", Port: "1234", Path: "/api"}
+// - "[::1]:9000" -> Upstream{Scheme: "http", Host: "::1", Port: "9000", Path: ""} (IPv6 format)
+// - "example-server.local:8080" -> Upstream{Scheme: "http", Host: "example-server.local", Port: "8080", Path: ""}
+// - "[https]192.168.50.2:1234" -> Upstream{Scheme: "https", Host: "192.168.50.2", Port: "1234", Path: ""}
 func ParseUpstream(key string) Upstream {
 	// Remove trailing colon if present (for YAML keys like "192.168.31.6:1234:")
 	key = strings.TrimSuffix(key, ":")
+
+	// Check for [https] prefix
+	scheme := "http"
+	if strings.HasPrefix(key, "[https]") {
+		scheme = "https"
+		key = strings.TrimPrefix(key, "[https]")
+	}
 
 	// Check for path suffix (e.g., "/api")
 	path := ""
@@ -53,9 +62,10 @@ func ParseUpstream(key string) Upstream {
 		closeBracket := strings.Index(key, "]")
 		if closeBracket > 0 && closeBracket < len(key)-1 && key[closeBracket+1] == ':' {
 			return Upstream{
-				Host: key[1:closeBracket],
-				Port: key[closeBracket+2:],
-				Path: path,
+				Scheme: scheme,
+				Host:   key[1:closeBracket],
+				Port:   key[closeBracket+2:],
+				Path:   path,
 			}
 		}
 	}
@@ -74,34 +84,38 @@ func ParseUpstream(key string) Upstream {
 			if strings.Count(key, ":") > 1 {
 				// This is likely malformed - default to treating as plain port
 				return Upstream{
-					Host: "127.0.0.1",
-					Port: key,
-					Path: path,
+					Scheme: scheme,
+					Host:   "127.0.0.1",
+					Port:   key,
+					Path:   path,
 				}
 			}
 			// Single colon at start (:8080) - treat as plain port
 			if host == "" {
 				return Upstream{
-					Host: "127.0.0.1",
-					Port: port,
-					Path: path,
+					Scheme: scheme,
+					Host:   "127.0.0.1",
+					Port:   port,
+					Path:   path,
 				}
 			}
 		}
 
 		// Valid host:port format (could be IP or hostname)
 		return Upstream{
-			Host: host,
-			Port: port,
-			Path: path,
+			Scheme: scheme,
+			Host:   host,
+			Port:   port,
+			Path:   path,
 		}
 	}
 
 	// Plain port format (default to localhost)
 	return Upstream{
-		Host: "127.0.0.1",
-		Port: key,
-		Path: path,
+		Scheme: scheme,
+		Host:   "127.0.0.1",
+		Port:   key,
+		Path:   path,
 	}
 }
 

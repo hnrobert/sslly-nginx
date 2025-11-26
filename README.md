@@ -47,8 +47,8 @@ Configure CORS (Cross-Origin Resource Sharing) settings globally or per-domain.
 ```yaml
 # You can also configure CORS for specific domains:
 cors:
-  "api.example.com":
-    allow_origin: "https://app.example.com"
+  'api.example.com':
+    allow_origin: 'https://app.example.com'
     allow_methods: [GET, POST, PUT, DELETE, OPTIONS]
     allow_headers: [Content-Type, Authorization]
     allow_credentials: true
@@ -94,6 +94,16 @@ example-server.local:8080:
   - ipv6.example.com
 ```
 
+##### Format 5: HTTPS Backend (Use `[https]` prefix)
+
+```yaml
+# Proxies to HTTPS backend (prevents "plain HTTP to HTTPS port" errors)
+'[https]192.168.50.2:8443':
+  - secure-backend.example.com
+```
+
+**Note:** By default, sslly-nginx forwards requests to upstream servers using HTTP. Use the `[https]` prefix when your upstream server expects HTTPS connections to avoid "400 Bad Request - The plain HTTP request was sent to HTTPS port" errors.
+
 #### Advanced: Path-based Routing
 
 Route different paths of the same domain to different backends:
@@ -115,10 +125,12 @@ This generates Nginx configuration with location-based routing:
 
 **Configuration Key Formats Summary:**
 
-- `port` → Proxies to `127.0.0.1:port` (default)
-- `ip:port` → Proxies to `ip:port`
-- `hostname:port` → Proxies to `hostname:port`
-- `[ipv6]:port` → Proxies to IPv6 address with brackets
+- `port` → Proxies to `127.0.0.1:port` via HTTP (default)
+- `ip:port` → Proxies to `ip:port` via HTTP
+- `hostname:port` → Proxies to `hostname:port` via HTTP
+- `[ipv6]:port` → Proxies to IPv6 address with brackets via HTTP
+- `[https]upstream` → Proxies to upstream via HTTPS (prevents "plain HTTP to HTTPS port" errors)
+  - Example: `[https]192.168.50.2:8443` forwards requests using HTTPS
 - `upstream/path` → Adds path routing to the upstream
   - Example: `192.168.50.2:5678/api` proxies `/api` requests to that backend
 

@@ -65,94 +65,149 @@ func TestLoadConfigEmpty(t *testing.T) {
 
 func TestParseUpstream(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		wantHost string
-		wantPort string
-		wantPath string
+		name       string
+		input      string
+		wantScheme string
+		wantHost   string
+		wantPort   string
+		wantPath   string
 	}{
 		{
-			name:     "Plain port number",
-			input:    "1234",
-			wantHost: "127.0.0.1",
-			wantPort: "1234",
-			wantPath: "",
+			name:       "Plain port number",
+			input:      "1234",
+			wantScheme: "http",
+			wantHost:   "127.0.0.1",
+			wantPort:   "1234",
+			wantPath:   "",
 		},
 		{
-			name:     "IP:port format",
-			input:    "192.168.31.6:1234",
-			wantHost: "192.168.31.6",
-			wantPort: "1234",
-			wantPath: "",
+			name:       "IP:port format",
+			input:      "192.168.31.6:1234",
+			wantScheme: "http",
+			wantHost:   "192.168.31.6",
+			wantPort:   "1234",
+			wantPath:   "",
 		},
 		{
-			name:     "IP:port with trailing colon (YAML key format)",
-			input:    "192.168.31.6:1234:",
-			wantHost: "192.168.31.6",
-			wantPort: "1234",
-			wantPath: "",
+			name:       "IP:port with trailing colon (YAML key format)",
+			input:      "192.168.31.6:1234:",
+			wantScheme: "http",
+			wantHost:   "192.168.31.6",
+			wantPort:   "1234",
+			wantPath:   "",
 		},
 		{
-			name:     "Plain port with trailing colon",
-			input:    "5678:",
-			wantHost: "127.0.0.1",
-			wantPort: "5678",
-			wantPath: "",
+			name:       "Plain port with trailing colon",
+			input:      "5678:",
+			wantScheme: "http",
+			wantHost:   "127.0.0.1",
+			wantPort:   "5678",
+			wantPath:   "",
 		},
 		{
-			name:     "Localhost with port",
-			input:    "localhost:8080",
-			wantHost: "localhost",
-			wantPort: "8080",
-			wantPath: "",
+			name:       "Localhost with port",
+			input:      "localhost:8080",
+			wantScheme: "http",
+			wantHost:   "localhost",
+			wantPort:   "8080",
+			wantPath:   "",
 		},
 		{
-			name:     "IPv6 localhost with brackets",
-			input:    "[::1]:9000",
-			wantHost: "::1",
-			wantPort: "9000",
-			wantPath: "",
+			name:       "IPv6 localhost with brackets",
+			input:      "[::1]:9000",
+			wantScheme: "http",
+			wantHost:   "::1",
+			wantPort:   "9000",
+			wantPath:   "",
 		},
 		{
-			name:     "IPv6 address with brackets",
-			input:    "[2001:db8::1]:8080",
-			wantHost: "2001:db8::1",
-			wantPort: "8080",
-			wantPath: "",
+			name:       "IPv6 address with brackets",
+			input:      "[2001:db8::1]:8080",
+			wantScheme: "http",
+			wantHost:   "2001:db8::1",
+			wantPort:   "8080",
+			wantPath:   "",
 		},
 		{
-			name:     "Hostname with port",
-			input:    "example-server.local:8080",
-			wantHost: "example-server.local",
-			wantPort: "8080",
-			wantPath: "",
+			name:       "Hostname with port",
+			input:      "example-server.local:8080",
+			wantScheme: "http",
+			wantHost:   "example-server.local",
+			wantPort:   "8080",
+			wantPath:   "",
 		},
 		{
-			name:     "IP:port with path",
-			input:    "192.168.50.2:5678/api",
-			wantHost: "192.168.50.2",
-			wantPort: "5678",
-			wantPath: "/api",
+			name:       "IP:port with path",
+			input:      "192.168.50.2:5678/api",
+			wantScheme: "http",
+			wantHost:   "192.168.50.2",
+			wantPort:   "5678",
+			wantPath:   "/api",
 		},
 		{
-			name:     "Plain port with path",
-			input:    "9012/admin",
-			wantHost: "127.0.0.1",
-			wantPort: "9012",
-			wantPath: "/admin",
+			name:       "Plain port with path",
+			input:      "9012/admin",
+			wantScheme: "http",
+			wantHost:   "127.0.0.1",
+			wantPort:   "9012",
+			wantPath:   "/admin",
 		},
 		{
-			name:     "IPv6 with path",
-			input:    "[2001:db8::1]:3000/api/v1",
-			wantHost: "2001:db8::1",
-			wantPort: "3000",
-			wantPath: "/api/v1",
+			name:       "IPv6 with path",
+			input:      "[2001:db8::1]:3000/api/v1",
+			wantScheme: "http",
+			wantHost:   "2001:db8::1",
+			wantPort:   "3000",
+			wantPath:   "/api/v1",
+		},
+		{
+			name:       "HTTPS scheme with IP:port",
+			input:      "[https]192.168.50.2:8443",
+			wantScheme: "https",
+			wantHost:   "192.168.50.2",
+			wantPort:   "8443",
+			wantPath:   "",
+		},
+		{
+			name:       "HTTPS scheme with plain port",
+			input:      "[https]8443",
+			wantScheme: "https",
+			wantHost:   "127.0.0.1",
+			wantPort:   "8443",
+			wantPath:   "",
+		},
+		{
+			name:       "HTTPS scheme with hostname",
+			input:      "[https]backend.local:8443",
+			wantScheme: "https",
+			wantHost:   "backend.local",
+			wantPort:   "8443",
+			wantPath:   "",
+		},
+		{
+			name:       "HTTPS scheme with path",
+			input:      "[https]192.168.50.2:8443/api",
+			wantScheme: "https",
+			wantHost:   "192.168.50.2",
+			wantPort:   "8443",
+			wantPath:   "/api",
+		},
+		{
+			name:       "HTTPS scheme with IPv6",
+			input:      "[https][2001:db8::1]:8443",
+			wantScheme: "https",
+			wantHost:   "2001:db8::1",
+			wantPort:   "8443",
+			wantPath:   "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			upstream := ParseUpstream(tt.input)
+			if upstream.Scheme != tt.wantScheme {
+				t.Errorf("ParseUpstream(%q).Scheme = %q, want %q", tt.input, upstream.Scheme, tt.wantScheme)
+			}
 			if upstream.Host != tt.wantHost {
 				t.Errorf("ParseUpstream(%q).Host = %q, want %q", tt.input, upstream.Host, tt.wantHost)
 			}

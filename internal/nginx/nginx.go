@@ -354,12 +354,12 @@ http {
 					locationPath = "/"
 				}
 
-				proxyPass := fmt.Sprintf("http://%s", upstreamAddr)
+				proxyPass := fmt.Sprintf("%s://%s", route.Upstream.Scheme, upstreamAddr)
 				if route.Upstream.Path != "" {
 					proxyPass += route.Upstream.Path
 				}
 
-				log.Printf("WARNING: No certificate found for domain: %s, serving over HTTP only (upstream: %s, path: %s)", baseDomain, upstreamAddr, locationPath)
+				log.Printf("WARNING: No certificate found for domain: %s, serving over HTTP only (upstream: %s://%s, path: %s)", baseDomain, route.Upstream.Scheme, upstreamAddr, locationPath)
 
 				sb.WriteString(fmt.Sprintf(`        location %s {
             proxy_pass %s;
@@ -417,12 +417,12 @@ http {
 				locationPath = "/"
 			}
 
-			proxyPass := fmt.Sprintf("http://%s", upstreamAddr)
+			proxyPass := fmt.Sprintf("%s://%s", route.Upstream.Scheme, upstreamAddr)
 			if route.Upstream.Path != "" {
 				proxyPass += route.Upstream.Path
 			}
 
-			log.Printf("  Route: %s -> %s (path: %s)", route.DomainPath, upstreamAddr, locationPath)
+			log.Printf("  Route: %s -> %s://%s (path: %s)", route.DomainPath, route.Upstream.Scheme, upstreamAddr, locationPath)
 
 			sb.WriteString(fmt.Sprintf(`        location %s {
             proxy_pass %s;
