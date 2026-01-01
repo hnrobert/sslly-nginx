@@ -5,6 +5,8 @@
 Get started in seconds with default configuration:
 
 ```bash
+export SSL_NGINX_HOME = ~/sslly-nginx
+mkdir -p $SSL_NGINX_HOME && cd $SSL_NGINX_HOME
 # Download Docker Compose configuration
 curl -fsSL https://raw.githubusercontent.com/hnrobert/sslly-nginx/main/docker-compose.yml -o docker-compose.yml
 

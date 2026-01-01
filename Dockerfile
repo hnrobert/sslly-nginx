@@ -23,10 +23,10 @@ RUN apk add --no-cache ca-certificates openssl
 COPY --from=builder /build/sslly-nginx /app/sslly-nginx
 
 # Create necessary directories
-RUN mkdir -p /app/configs /app/ssl /etc/nginx/ssl
+RUN mkdir -p /app/configs /app/ssl /etc/nginx/ssl /etc/sslly/configs
 
 # Copy default configuration
-COPY configs/config.example.yaml /app/configs/config.yaml
+COPY configs/config.example.yaml /etc/sslly/configs/config.yaml
 
 # Generate a dummy self-signed certificate for default HTTPS server
 RUN openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \

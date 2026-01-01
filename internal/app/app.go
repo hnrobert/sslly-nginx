@@ -2,8 +2,10 @@ package app
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/hnrobert/sslly-nginx/internal/config"
@@ -13,9 +15,11 @@ import (
 )
 
 const (
-	configDir = "./configs"
-	sslDir    = "./ssl"
-	nginxConf = "/etc/nginx/nginx.conf"
+	configDir             = "./configs"
+	sslDir                = "./ssl"
+	nginxConf             = "/etc/nginx/nginx.conf"
+	configFilePath        = "/app/configs/config.yaml"
+	defaultConfigFilePath = "/etc/sslly/configs/config.yaml"
 )
 
 type App struct {
@@ -33,6 +37,10 @@ func New() (*App, error) {
 }
 
 func (a *App) Start() error {
+	if err := ensureConfigFile(configFilePath, defaultConfigFilePath); err != nil {
+		return fmt.Errorf("config initialization failed: %w", err)
+	}
+
 	// Initial configuration load and nginx setup
 	if err := a.reload(); err != nil {
 		return fmt.Errorf("initial setup failed: %w", err)
@@ -57,6 +65,41 @@ func (a *App) Start() error {
 	}
 
 	log.Println("Application started successfully")
+	return nil
+}
+
+func ensureConfigFile(destPath, defaultPath string) error {
+	if _, err := os.Stat(destPath); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	if _, err := os.Stat(defaultPath); err != nil {
+		return fmt.Errorf("default config not found at %s: %w", defaultPath, err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+		return err
+	}
+
+	src, err := os.Open(defaultPath)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	dst, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, src); err != nil {
+		return err
+	}
+
+	log.Printf("Config file not found, copied default config: %s -> %s", defaultPath, destPath)
 	return nil
 }
 

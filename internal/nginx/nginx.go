@@ -36,6 +36,11 @@ func (m *Manager) Start() error {
 	os.Remove("/var/run/nginx.pid")
 
 	cmd := exec.Command("nginx", "-g", "daemon off;")
+	// Important: by default, os/exec discards child stdout/stderr.
+	// If nginx logs to /dev/stdout|/dev/stderr (common in containers), we must
+	// wire these streams so they appear in `docker logs`.
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 
 	// Start nginx in background
 	if err := cmd.Start(); err != nil {

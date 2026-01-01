@@ -19,6 +19,7 @@
         "softprops",
         "sslly",
         "subj",
+        "venv",
         "yourdomain"
     ]
 }
