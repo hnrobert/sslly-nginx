@@ -37,6 +37,14 @@ func New() (*App, error) {
 }
 
 func (a *App) Start() error {
+	// Ensure mount dirs are writable by host/container users
+	if err := ensureDirWritable("/app/configs"); err != nil {
+		logger.Warn("failed to ensure /app/configs is writable: %v", err)
+	}
+	if err := ensureDirWritable("/app/ssl"); err != nil {
+		logger.Warn("failed to ensure /app/ssl is writable: %v", err)
+	}
+
 	if err := ensureConfigFile(configFilePath, defaultConfigFilePath); err != nil {
 		return fmt.Errorf("config initialization failed: %w", err)
 	}
@@ -89,7 +97,7 @@ func ensureConfigFile(destPath, defaultPath string) error {
 	}
 	defer src.Close()
 
-	dst, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	dst, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0666)
 	if err != nil {
 		return err
 	}
@@ -100,10 +108,11 @@ func ensureConfigFile(destPath, defaultPath string) error {
 	}
 
 	// Ensure permissive permissions so host user can write if necessary
-	if err := os.Chmod(destPath, 0644); err != nil {
+	// Files: 0666 (rw for all), Dirs: 0777 (rwx for all)
+	if err := os.Chmod(destPath, 0666); err != nil {
 		logger.Warn("failed to chmod %s: %v", destPath, err)
 	}
-	if err := os.Chmod(filepath.Dir(destPath), 0755); err != nil {
+	if err := os.Chmod(filepath.Dir(destPath), 0777); err != nil {
 		logger.Warn("failed to chmod %s: %v", filepath.Dir(destPath), err)
 	}
 
@@ -129,6 +138,52 @@ func (a *App) Stop() {
 		a.sslWatcher.Stop()
 	}
 	a.nginxManager.Stop()
+}
+
+// ensureDirWritable makes a directory and its existing contents writable by any user,
+// and attempts to chown to UID/GID 1000 when running as root.
+func ensureDirWritable(dir string) error {
+	// Create if not exists
+	if err := os.MkdirAll(dir, 0777); err != nil {
+		return err
+	}
+
+	// Walk entries and set permissive permissions
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		p := filepath.Join(dir, e.Name())
+		if e.IsDir() {
+			if err := os.Chmod(p, 0777); err != nil {
+				logger.Warn("failed to chmod dir %s: %v", p, err)
+			}
+		} else {
+			if err := os.Chmod(p, 0666); err != nil {
+				logger.Warn("failed to chmod file %s: %v", p, err)
+			}
+		}
+		// Attempt chown if root
+		if os.Geteuid() == 0 {
+			if err := os.Chown(p, 1000, 1000); err != nil {
+				// Not fatal
+				logger.Warn("failed to chown %s: %v", p, err)
+			}
+		}
+	}
+
+	// Finally ensure dir itself has permissive perms and ownership
+	if err := os.Chmod(dir, 0777); err != nil {
+		logger.Warn("failed to chmod dir %s: %v", dir, err)
+	}
+	if os.Geteuid() == 0 {
+		if err := os.Chown(dir, 1000, 1000); err != nil {
+			logger.Warn("failed to chown dir %s: %v", dir, err)
+		}
+	}
+
+	return nil
 }
 
 func (a *App) setupWatchers() error {
