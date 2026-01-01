@@ -41,7 +41,7 @@ func Fatal(format string, args ...interface{}) {
 func log(level, levelColor, format string, args ...interface{}) {
 	timestamp := time.Now().Format("2006-01-02 15:04:05")
 	message := fmt.Sprintf(format, args...)
-	
+
 	fmt.Printf("%s[SSLLY-NGINX]%s %s[%s]%s %s[%s]%s %s%s%s\n",
 		colorGreen, colorReset,
 		colorWhite, timestamp, colorReset,

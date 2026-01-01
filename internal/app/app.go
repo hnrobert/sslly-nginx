@@ -8,8 +8,8 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/hnrobert/sslly-nginx/internal/config"
-	"github.com/hnrobert/sslly-nginx/internal/nginx"
 	"github.com/hnrobert/sslly-nginx/internal/logger"
+	"github.com/hnrobert/sslly-nginx/internal/nginx"
 	"github.com/hnrobert/sslly-nginx/internal/ssl"
 	"github.com/hnrobert/sslly-nginx/internal/watcher"
 )
