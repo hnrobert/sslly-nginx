@@ -67,29 +67,29 @@ cors:
   - example.com
   - child.example.com
 
-5678:
-  - example2.com
+# 5678:
+#   - example2.com
 
 # Example 2: Proxy to another machine on LAN
-192.168.50.2:1234:
-  - lan.example.com
+# 192.168.50.2:1234:
+#   - lan.example.com
 
 # Example 3: Proxy to a named host
-example-server.local:8080:
-  - remote.example.com
+# example-server.local:8080:
+#   - remote.example.com
 
 # Example 4: Proxy to IPv6 address (use "[ipv6:with:brackets]:port")
-"[2001:db8::1]:3000":
-  - ipv6.example.com
+# "[2001:db8::1]:3000":
+#   - ipv6.example.com
 
 # Example 5: Proxy to HTTPS backend (use [https] prefix)
 # This prevents "400 Bad Request - The plain HTTP request was sent to HTTPS port" errors
-"[https]192.168.50.2:8443":
-  - secure-backend.example.com
+# "[https]192.168.50.2:8443":
+#   - secure-backend.example.com
 
 # Example 6: Shared Domain with different routes
-9012:
-  - shared.example.com
+# 9012:
+#   - shared.example.com
 
-192.168.50.2:5678/api:
-  - shared.example.com/api
+# 192.168.50.2:5678/api:
+#   - shared.example.com/api
