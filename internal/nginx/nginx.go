@@ -2,7 +2,6 @@ package nginx
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -10,6 +9,7 @@ import (
 	"time"
 
 	"github.com/hnrobert/sslly-nginx/internal/config"
+	"github.com/hnrobert/sslly-nginx/internal/logger"
 	"github.com/hnrobert/sslly-nginx/internal/ssl"
 )
 
@@ -30,7 +30,7 @@ func NewManager() *Manager {
 }
 
 func (m *Manager) Start() error {
-	log.Println("Starting nginx...")
+	logger.Info("Starting nginx...")
 
 	// Remove stale PID file if it exists
 	os.Remove("/var/run/nginx.pid")
@@ -56,7 +56,7 @@ func (m *Manager) Start() error {
 	if m.cmd.Process != nil {
 		pidStr := fmt.Sprintf("%d\n", m.cmd.Process.Pid)
 		if err := os.WriteFile("/var/run/nginx.pid", []byte(pidStr), 0644); err != nil {
-			log.Printf("WARNING: Failed to write PID file: %v", err)
+			logger.Warn("Failed to write PID file: %v", err)
 		}
 	}
 
@@ -65,13 +65,13 @@ func (m *Manager) Start() error {
 
 func (m *Manager) Stop() {
 	if m.cmd != nil && m.cmd.Process != nil {
-		log.Println("Stopping nginx...")
+		logger.Info("Stopping nginx...")
 		m.cmd.Process.Kill()
 	}
 }
 
 func (m *Manager) Reload() error {
-	log.Println("Reloading nginx...")
+	logger.Info("Reloading nginx...")
 
 	// Test configuration first
 	cmd := exec.Command("nginx", "-t")
@@ -364,7 +364,7 @@ http {
 					proxyPass += route.Upstream.Path
 				}
 
-				log.Printf("WARNING: No certificate found for domain: %s, serving over HTTP only (upstream: %s://%s, path: %s)", baseDomain, route.Upstream.Scheme, upstreamAddr, locationPath)
+				logger.Warn("No certificate found for domain: %s, serving over HTTP only (upstream: %s://%s, path: %s)", baseDomain, route.Upstream.Scheme, upstreamAddr, locationPath)
 
 				sb.WriteString(fmt.Sprintf(`        location %s {
             proxy_pass %s;
@@ -399,7 +399,7 @@ http {
 		}
 
 		// Certificate found - create HTTPS server block
-		log.Printf("Found certificate for domain: %s", baseDomain)
+		logger.Info("Found certificate for domain: %s", baseDomain)
 		sb.WriteString(fmt.Sprintf(`    # HTTPS server block for %s
     server {
         listen %s ssl;
@@ -427,7 +427,7 @@ http {
 				proxyPass += route.Upstream.Path
 			}
 
-			log.Printf("  Route: %s -> %s://%s (path: %s)", route.DomainPath, route.Upstream.Scheme, upstreamAddr, locationPath)
+			logger.Info("  Route: %s -> %s://%s (path: %s)", route.DomainPath, route.Upstream.Scheme, upstreamAddr, locationPath)
 
 			sb.WriteString(fmt.Sprintf(`        location %s {
             proxy_pass %s;
