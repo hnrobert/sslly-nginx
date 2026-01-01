@@ -99,6 +99,24 @@ func ensureConfigFile(destPath, defaultPath string) error {
 		return err
 	}
 
+	// Ensure permissive permissions so host user can write if necessary
+	if err := os.Chmod(destPath, 0644); err != nil {
+		log.Printf("WARNING: failed to chmod %s: %v", destPath, err)
+	}
+	if err := os.Chmod(filepath.Dir(destPath), 0755); err != nil {
+		log.Printf("WARNING: failed to chmod %s: %v", filepath.Dir(destPath), err)
+	}
+
+	// If running as root inside the image, attempt to chown files to UID/GID 1000:1000
+	if os.Geteuid() == 0 {
+		if err := os.Chown(destPath, 1000, 1000); err != nil {
+			log.Printf("WARNING: failed to chown %s: %v", destPath, err)
+		}
+		if err := os.Chown(filepath.Dir(destPath), 1000, 1000); err != nil {
+			log.Printf("WARNING: failed to chown %s: %v", filepath.Dir(destPath), err)
+		}
+	}
+
 	log.Printf("Config file not found, copied default config: %s -> %s", defaultPath, destPath)
 	return nil
 }

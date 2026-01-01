@@ -20,6 +20,7 @@
         "sslly",
         "subj",
         "venv",
+        "writable",
         "yourdomain"
     ]
 }
