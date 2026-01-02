@@ -5,6 +5,10 @@
 Get started in seconds with default configuration:
 
 ```bash
+# Set up working directory
+export SSLLY_NGINX_HOME=$HOME/sslly-nginx
+mkdir -p $SSLLY_NGINX_HOME && cd $SSLLY_NGINX_HOME
+
 # Download Docker Compose configuration
 curl -fsSL https://raw.githubusercontent.com/hnrobert/sslly-nginx/main/docker-compose.yml -o docker-compose.yml
 
@@ -18,10 +22,7 @@ That's it! The service will start with default configuration and create necessar
 
 - **Default Configuration**: Maps incoming hostnames to backend addresses. By default:
 
-  - `a.com` & `b.a.com` → `localhost:1234`
-  - `b.com` → `localhost:5678`
-  - `lan.example.com` → `192.168.31.6:1234`
-  - `remote.example.com` → `remote-server:8080`
+  - `yourdomain.com` & `www.yourdomain.com` → `localhost:1234`
 
 - **Local Directories**: Creates `configs/` and `ssl/` directories in your current directory
 - **Hot Reload**: Automatically reloads when you modify configuration or add SSL certificates
@@ -33,10 +34,12 @@ Edit `configs/config.yaml` to change or add routes and meeting your requirements
 
 ```yaml
 # Format Options:
-# 1. port: [domains]           - Proxies to localhost:port (127.0.0.1:port)
-# 2. ip:port: [domains]        - Proxies to specified ip:port
-# 3. hostname:port: [domains]  - Proxies to specified hostname:port
-# 4. [ipv6]:port: [domains]    - Proxies to IPv6 address (add brackets)
+# 1. port: [domains]              - Proxies to localhost:port (127.0.0.1:port)
+# 2. ip:port: [domains]           - Proxies to specified ip:port
+# 3. hostname:port: [domains]     - Proxies to specified hostname:port
+# 4. "[ipv6]:port": [domains]     - Proxies to IPv6 address (add brackets)
+# 5. "[https]ip:port": [domains]  - Proxies to HTTPS backend (adds [https] prefix)
+# 6. ip:port/path: [domain/paths] - Proxies to specific path on localhost:port
 ```
 
 ### Add SSL Certificates

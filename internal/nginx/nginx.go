@@ -2,7 +2,6 @@ package nginx
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -10,6 +9,7 @@ import (
 	"time"
 
 	"github.com/hnrobert/sslly-nginx/internal/config"
+	"github.com/hnrobert/sslly-nginx/internal/logger"
 	"github.com/hnrobert/sslly-nginx/internal/ssl"
 )
 
@@ -17,17 +17,30 @@ type Manager struct {
 	cmd *exec.Cmd
 }
 
+// RouteConfig represents a routing configuration for a domain/path combination
+type RouteConfig struct {
+	Upstream   config.Upstream
+	DomainPath string
+	BaseDomain string
+	Path       string
+}
+
 func NewManager() *Manager {
 	return &Manager{}
 }
 
 func (m *Manager) Start() error {
-	log.Println("Starting nginx...")
+	logger.Info("Starting nginx...")
 
 	// Remove stale PID file if it exists
 	os.Remove("/var/run/nginx.pid")
 
 	cmd := exec.Command("nginx", "-g", "daemon off;")
+	// Important: by default, os/exec discards child stdout/stderr.
+	// If nginx logs to /dev/stdout|/dev/stderr (common in containers), we must
+	// wire these streams so they appear in `docker logs`.
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 
 	// Start nginx in background
 	if err := cmd.Start(); err != nil {
@@ -43,7 +56,7 @@ func (m *Manager) Start() error {
 	if m.cmd.Process != nil {
 		pidStr := fmt.Sprintf("%d\n", m.cmd.Process.Pid)
 		if err := os.WriteFile("/var/run/nginx.pid", []byte(pidStr), 0644); err != nil {
-			log.Printf("WARNING: Failed to write PID file: %v", err)
+			logger.Warn("Failed to write PID file: %v", err)
 		}
 	}
 
@@ -52,13 +65,13 @@ func (m *Manager) Start() error {
 
 func (m *Manager) Stop() {
 	if m.cmd != nil && m.cmd.Process != nil {
-		log.Println("Stopping nginx...")
+		logger.Info("Stopping nginx...")
 		m.cmd.Process.Kill()
 	}
 }
 
 func (m *Manager) Reload() error {
-	log.Println("Reloading nginx...")
+	logger.Info("Reloading nginx...")
 
 	// Test configuration first
 	cmd := exec.Command("nginx", "-t")
@@ -89,6 +102,117 @@ func (m *Manager) CheckHealth() error {
 	}
 
 	return nil
+}
+
+// getCORSConfig returns the CORS configuration for a given domain
+func getCORSConfig(cfg *config.Config, domain string) *config.CORSConfig {
+	// Check for wildcard first
+	if corsConfig, ok := cfg.CORS["*"]; ok {
+		return &corsConfig
+	}
+
+	// Check for exact domain match
+	if corsConfig, ok := cfg.CORS[domain]; ok {
+		return &corsConfig
+	}
+
+	return nil
+}
+
+// generateCORSHeaders generates CORS header configuration from CORSConfig
+func generateCORSHeaders(corsConfig *config.CORSConfig) string {
+	if corsConfig == nil {
+		// Default CORS configuration
+		return `            # CORS configuration
+            add_header 'Access-Control-Allow-Origin' '*' always;
+            add_header 'Access-Control-Allow-Methods' 'GET, HEAD, POST, PUT, DELETE, CONNECT, OPTIONS, TRACE, PATCH' always;
+            add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization' always;
+            add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;
+
+            # Handle OPTIONS preflight requests
+            if ($request_method = 'OPTIONS') {
+                add_header 'Access-Control-Max-Age' 1728000;
+                add_header 'Content-Type' 'text/plain; charset=utf-8';
+                add_header 'Content-Length' 0;
+                return 204;
+            }`
+	}
+
+	// Apply defaults
+	allowOrigin := corsConfig.AllowOrigin
+	if allowOrigin == "" {
+		allowOrigin = "*"
+	}
+
+	allowMethods := corsConfig.AllowMethods
+	if len(allowMethods) == 0 {
+		allowMethods = []string{"GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH"}
+	}
+	methodsStr := strings.Join(allowMethods, ", ")
+
+	allowHeaders := corsConfig.AllowHeaders
+	if len(allowHeaders) == 0 {
+		allowHeaders = []string{"DNT", "User-Agent", "X-Requested-With", "If-Modified-Since", "Cache-Control", "Content-Type", "Range", "Authorization"}
+	}
+	headersStr := strings.Join(allowHeaders, ",")
+
+	exposeHeaders := corsConfig.ExposeHeaders
+	if len(exposeHeaders) == 0 {
+		exposeHeaders = []string{"Content-Length", "Content-Range"}
+	}
+	exposeHeadersStr := strings.Join(exposeHeaders, ",")
+
+	maxAge := corsConfig.MaxAge
+	if maxAge == 0 {
+		maxAge = 1728000 // 20 days
+	}
+
+	var sb strings.Builder
+	sb.WriteString("            # CORS configuration\n")
+	sb.WriteString(fmt.Sprintf("            add_header 'Access-Control-Allow-Origin' '%s' always;\n", allowOrigin))
+	sb.WriteString(fmt.Sprintf("            add_header 'Access-Control-Allow-Methods' '%s' always;\n", methodsStr))
+	sb.WriteString(fmt.Sprintf("            add_header 'Access-Control-Allow-Headers' '%s' always;\n", headersStr))
+	sb.WriteString(fmt.Sprintf("            add_header 'Access-Control-Expose-Headers' '%s' always;\n", exposeHeadersStr))
+
+	if corsConfig.AllowCredentials {
+		sb.WriteString("            add_header 'Access-Control-Allow-Credentials' 'true' always;\n")
+	}
+
+	sb.WriteString("\n            # Handle OPTIONS preflight requests\n")
+	sb.WriteString("            if ($request_method = 'OPTIONS') {\n")
+	sb.WriteString(fmt.Sprintf("                add_header 'Access-Control-Allow-Origin' '%s' always;\n", allowOrigin))
+	sb.WriteString(fmt.Sprintf("                add_header 'Access-Control-Allow-Methods' '%s' always;\n", methodsStr))
+	sb.WriteString(fmt.Sprintf("                add_header 'Access-Control-Allow-Headers' '%s' always;\n", headersStr))
+	if corsConfig.AllowCredentials {
+		sb.WriteString("                add_header 'Access-Control-Allow-Credentials' 'true' always;\n")
+	}
+	sb.WriteString(fmt.Sprintf("                add_header 'Access-Control-Max-Age' %d always;\n", maxAge))
+	sb.WriteString("                add_header 'Content-Type' 'text/plain; charset=utf-8';\n")
+	sb.WriteString("                add_header 'Content-Length' 0;\n")
+	sb.WriteString("                return 204;\n")
+	sb.WriteString("            }")
+
+	return sb.String()
+} // splitDomainPath splits domain/path into domain and path parts
+func splitDomainPath(domainPath string) (string, string) {
+	if idx := strings.Index(domainPath, "/"); idx > 0 {
+		return domainPath[:idx], domainPath[idx:]
+	}
+	return domainPath, ""
+}
+
+// formatUpstreamAddr formats upstream address properly for nginx
+// IPv6 addresses need to be wrapped in brackets
+func formatUpstreamAddr(upstream config.Upstream) string {
+	host := upstream.Host
+
+	// Check if host is IPv6 (contains colons but not already bracketed)
+	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
+		// It's IPv6, wrap in brackets
+		host = "[" + host + "]"
+	}
+
+	return fmt.Sprintf("%s:%s", host, upstream.Port)
 }
 
 func GenerateConfig(cfg *config.Config, certMap map[string]ssl.Certificate) string {
@@ -193,24 +317,57 @@ http {
 
 `)
 
-	// Generate server blocks for each port and domain
-	for portKey, domains := range cfg.Ports {
-		// Parse the upstream (could be "port" or "ip:port")
-		upstream := config.ParseUpstream(portKey)
-		upstreamAddr := fmt.Sprintf("%s:%s", upstream.Host, upstream.Port)
+	// Map: baseDomain -> []RouteConfig
+	domainRoutes := make(map[string][]RouteConfig)
 
-		for _, domain := range domains {
-			cert, ok := certMap[domain]
-			if !ok {
-				// No certificate found - create HTTP-only server block
-				log.Printf("WARNING: No certificate found for domain: %s, serving over HTTP only (upstream: %s)", domain, upstreamAddr)
-				sb.WriteString(fmt.Sprintf(`    # HTTP server block for %s -> %s (no SSL)
+	// Parse all routes and group by base domain
+	for portKey, domainPaths := range cfg.Ports {
+		upstream := config.ParseUpstream(portKey)
+
+		for _, domainPath := range domainPaths {
+			baseDomain, path := splitDomainPath(domainPath)
+
+			domainRoutes[baseDomain] = append(domainRoutes[baseDomain], RouteConfig{
+				Upstream:   upstream,
+				DomainPath: domainPath,
+				BaseDomain: baseDomain,
+				Path:       path,
+			})
+		}
+	}
+
+	// Generate server blocks for each base domain
+	for baseDomain, routes := range domainRoutes {
+		cert, hasCert := certMap[baseDomain]
+		corsConfig := getCORSConfig(cfg, baseDomain)
+
+		if !hasCert {
+			// No certificate found - create HTTP-only server block
+			sb.WriteString(fmt.Sprintf(`    # HTTP server block for %s (no SSL)
     server {
         listen %s;
         server_name %s;
 
-        location / {
-            proxy_pass http://%s;
+`, baseDomain, httpPort, baseDomain))
+
+			// Generate location blocks for each route (sorted by path length, longest first)
+			sortRoutesByPathLength(routes)
+			for _, route := range routes {
+				upstreamAddr := formatUpstreamAddr(route.Upstream)
+				locationPath := route.Path
+				if locationPath == "" {
+					locationPath = "/"
+				}
+
+				proxyPass := fmt.Sprintf("%s://%s", route.Upstream.Scheme, upstreamAddr)
+				if route.Upstream.Path != "" {
+					proxyPass += route.Upstream.Path
+				}
+
+				logger.Warn("No certificate found for domain: %s, serving over HTTP only (upstream: %s://%s, path: %s)", baseDomain, route.Upstream.Scheme, upstreamAddr, locationPath)
+
+				sb.WriteString(fmt.Sprintf(`        location %s {
+            proxy_pass %s;
             proxy_http_version 1.1;
 
             # Standard proxy headers
@@ -228,16 +385,22 @@ http {
             proxy_connect_timeout 60s;
             proxy_send_timeout 60s;
             proxy_read_timeout 60s;
-        }
-    }
 
-`, domain, upstreamAddr, httpPort, domain, upstreamAddr))
-				continue
+%s
+        }
+
+`, locationPath, proxyPass, generateCORSHeaders(corsConfig)))
 			}
 
-			// Certificate found - create HTTPS server block
-			log.Printf("Found certificate for domain: %s (upstream: %s)", domain, upstreamAddr)
-			sb.WriteString(fmt.Sprintf(`    # HTTPS server block for %s -> %s
+			sb.WriteString(`    }
+
+`)
+			continue
+		}
+
+		// Certificate found - create HTTPS server block
+		logger.Info("Found certificate for domain: %s", baseDomain)
+		sb.WriteString(fmt.Sprintf(`    # HTTPS server block for %s
     server {
         listen %s ssl;
         server_name %s;
@@ -248,8 +411,26 @@ http {
         ssl_ciphers HIGH:!aNULL:!MD5;
         ssl_prefer_server_ciphers on;
 
-        location / {
-            proxy_pass http://%s;
+`, baseDomain, httpsPort, baseDomain, cert.CertPath, cert.KeyPath))
+
+		// Generate location blocks for each route
+		sortRoutesByPathLength(routes)
+		for _, route := range routes {
+			upstreamAddr := formatUpstreamAddr(route.Upstream)
+			locationPath := route.Path
+			if locationPath == "" {
+				locationPath = "/"
+			}
+
+			proxyPass := fmt.Sprintf("%s://%s", route.Upstream.Scheme, upstreamAddr)
+			if route.Upstream.Path != "" {
+				proxyPass += route.Upstream.Path
+			}
+
+			logger.Info("  Route: %s -> %s://%s (path: %s)", route.DomainPath, route.Upstream.Scheme, upstreamAddr, locationPath)
+
+			sb.WriteString(fmt.Sprintf(`        location %s {
+            proxy_pass %s;
             proxy_http_version 1.1;
 
             # Standard proxy headers
@@ -270,14 +451,31 @@ http {
             proxy_connect_timeout 60s;
             proxy_send_timeout 60s;
             proxy_read_timeout 60s;
-        }
-    }
 
-`, domain, upstreamAddr, httpsPort, domain, cert.CertPath, cert.KeyPath, upstreamAddr))
+%s
+        }
+
+`, locationPath, proxyPass, generateCORSHeaders(corsConfig)))
 		}
+
+		sb.WriteString(`    }
+
+`)
 	}
 
 	sb.WriteString("}\n")
 
 	return sb.String()
+}
+
+// sortRoutesByPathLength sorts routes by path length (longest first) for proper nginx matching
+func sortRoutesByPathLength(routes []RouteConfig) {
+	// Simple bubble sort - good enough for small number of routes
+	for i := 0; i < len(routes)-1; i++ {
+		for j := 0; j < len(routes)-i-1; j++ {
+			if len(routes[j].Path) < len(routes[j+1].Path) {
+				routes[j], routes[j+1] = routes[j+1], routes[j]
+			}
+		}
+	}
 }

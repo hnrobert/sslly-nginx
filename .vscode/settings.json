@@ -15,10 +15,13 @@
         "keyout",
         "myapp",
         "newkey",
+        "oneline",
         "pipefail",
         "softprops",
         "sslly",
         "subj",
+        "venv",
+        "writable",
         "yourdomain"
     ]
 }

@@ -1,25 +1,24 @@
 package main
 
 import (
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/hnrobert/sslly-nginx/internal/app"
+	"github.com/hnrobert/sslly-nginx/internal/logger"
 )
 
 func main() {
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	log.Println("Starting sslly-nginx...")
+	logger.Info("Starting sslly-nginx...")
 
 	application, err := app.New()
 	if err != nil {
-		log.Fatalf("Failed to create application: %v", err)
+		logger.Fatal("Failed to create application: %v", err)
 	}
 
 	if err := application.Start(); err != nil {
-		log.Fatalf("Failed to start application: %v", err)
+		logger.Fatal("Failed to start application: %v", err)
 	}
 
 	// Wait for interrupt signal
@@ -27,6 +26,6 @@ func main() {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	<-sigChan
 
-	log.Println("Shutting down sslly-nginx...")
+	logger.Info("Shutting down sslly-nginx...")
 	application.Stop()
 }

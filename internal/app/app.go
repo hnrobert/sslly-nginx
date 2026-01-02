@@ -2,20 +2,24 @@ package app
 
 import (
 	"fmt"
-	"log"
+	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/hnrobert/sslly-nginx/internal/config"
+	"github.com/hnrobert/sslly-nginx/internal/logger"
 	"github.com/hnrobert/sslly-nginx/internal/nginx"
 	"github.com/hnrobert/sslly-nginx/internal/ssl"
 	"github.com/hnrobert/sslly-nginx/internal/watcher"
 )
 
 const (
-	configDir = "./configs"
-	sslDir    = "./ssl"
-	nginxConf = "/etc/nginx/nginx.conf"
+	configDir             = "./configs"
+	sslDir                = "./ssl"
+	nginxConf             = "/etc/nginx/nginx.conf"
+	configFilePath        = "/app/configs/config.yaml"
+	defaultConfigFilePath = "/etc/sslly/configs/config.yaml"
 )
 
 type App struct {
@@ -33,6 +37,18 @@ func New() (*App, error) {
 }
 
 func (a *App) Start() error {
+	// Ensure mount dirs are writable by host/container users
+	if err := ensureDirWritable("/app/configs"); err != nil {
+		logger.Warn("failed to ensure /app/configs is writable: %v", err)
+	}
+	if err := ensureDirWritable("/app/ssl"); err != nil {
+		logger.Warn("failed to ensure /app/ssl is writable: %v", err)
+	}
+
+	if err := ensureConfigFile(configFilePath, defaultConfigFilePath); err != nil {
+		return fmt.Errorf("config initialization failed: %w", err)
+	}
+
 	// Initial configuration load and nginx setup
 	if err := a.reload(); err != nil {
 		return fmt.Errorf("initial setup failed: %w", err)
@@ -56,7 +72,61 @@ func (a *App) Start() error {
 		return fmt.Errorf("failed to setup watchers: %w", err)
 	}
 
-	log.Println("Application started successfully")
+	logger.Info("Application started successfully")
+	return nil
+}
+
+func ensureConfigFile(destPath, defaultPath string) error {
+	if _, err := os.Stat(destPath); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	if _, err := os.Stat(defaultPath); err != nil {
+		return fmt.Errorf("default config not found at %s: %w", defaultPath, err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+		return err
+	}
+
+	src, err := os.Open(defaultPath)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	dst, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0666)
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, src); err != nil {
+		return err
+	}
+
+	// Ensure permissive permissions so host user can write if necessary
+	// Files: 0666 (rw for all), Dirs: 0777 (rwx for all)
+	if err := os.Chmod(destPath, 0666); err != nil {
+		logger.Warn("failed to chmod %s: %v", destPath, err)
+	}
+	if err := os.Chmod(filepath.Dir(destPath), 0777); err != nil {
+		logger.Warn("failed to chmod %s: %v", filepath.Dir(destPath), err)
+	}
+
+	// If running as root inside the image, attempt to chown files to UID/GID 1000:1000
+	if os.Geteuid() == 0 {
+		if err := os.Chown(destPath, 1000, 1000); err != nil {
+			logger.Warn("failed to chown %s: %v", destPath, err)
+		}
+		if err := os.Chown(filepath.Dir(destPath), 1000, 1000); err != nil {
+			logger.Warn("failed to chown %s: %v", filepath.Dir(destPath), err)
+		}
+	}
+
+	logger.Info("Config file not found, copied default config: %s -> %s", defaultPath, destPath)
 	return nil
 }
 
@@ -68,6 +138,52 @@ func (a *App) Stop() {
 		a.sslWatcher.Stop()
 	}
 	a.nginxManager.Stop()
+}
+
+// ensureDirWritable makes a directory and its existing contents writable by any user,
+// and attempts to chown to UID/GID 1000 when running as root.
+func ensureDirWritable(dir string) error {
+	// Create if not exists
+	if err := os.MkdirAll(dir, 0777); err != nil {
+		return err
+	}
+
+	// Walk entries and set permissive permissions
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		p := filepath.Join(dir, e.Name())
+		if e.IsDir() {
+			if err := os.Chmod(p, 0777); err != nil {
+				logger.Warn("failed to chmod dir %s: %v", p, err)
+			}
+		} else {
+			if err := os.Chmod(p, 0666); err != nil {
+				logger.Warn("failed to chmod file %s: %v", p, err)
+			}
+		}
+		// Attempt chown if root
+		if os.Geteuid() == 0 {
+			if err := os.Chown(p, 1000, 1000); err != nil {
+				// Not fatal
+				logger.Warn("failed to chown %s: %v", p, err)
+			}
+		}
+	}
+
+	// Finally ensure dir itself has permissive perms and ownership
+	if err := os.Chmod(dir, 0777); err != nil {
+		logger.Warn("failed to chmod dir %s: %v", dir, err)
+	}
+	if os.Geteuid() == 0 {
+		if err := os.Chown(dir, 1000, 1000); err != nil {
+			logger.Warn("failed to chown dir %s: %v", dir, err)
+		}
+	}
+
+	return nil
 }
 
 func (a *App) setupWatchers() error {
@@ -94,14 +210,14 @@ func (a *App) setupWatchers() error {
 					return
 				}
 				if event.Op&fsnotify.Write == fsnotify.Write || event.Op&fsnotify.Create == fsnotify.Create {
-					log.Printf("Config file changed: %s", event.Name)
+					logger.Info("Config file changed: %s", event.Name)
 					a.handleReload()
 				}
 			case err, ok := <-configWatcher.Errors:
 				if !ok {
 					return
 				}
-				log.Printf("Config watcher error: %v", err)
+				logger.Error("Config watcher error: %v", err)
 			}
 		}
 	}()
@@ -117,14 +233,14 @@ func (a *App) setupWatchers() error {
 				if event.Op&fsnotify.Write == fsnotify.Write ||
 					event.Op&fsnotify.Create == fsnotify.Create ||
 					event.Op&fsnotify.Remove == fsnotify.Remove {
-					log.Printf("SSL file changed: %s", event.Name)
+					logger.Info("SSL file changed: %s", event.Name)
 					a.handleReload()
 				}
 			case err, ok := <-sslWatcher.Errors:
 				if !ok {
 					return
 				}
-				log.Printf("SSL watcher error: %v", err)
+				logger.Error("SSL watcher error: %v", err)
 			}
 		}
 	}()
@@ -150,7 +266,7 @@ func (a *App) reload() error {
 	for _, domains := range cfg.Ports {
 		for _, domain := range domains {
 			if _, ok := certMap[domain]; !ok {
-				log.Printf("WARNING: No certificate found for domain: %s (will serve over HTTP)", domain)
+				logger.Warn("No certificate found for domain: %s (will serve over HTTP)", domain)
 			}
 		}
 	}
@@ -163,49 +279,49 @@ func (a *App) reload() error {
 		return fmt.Errorf("failed to write nginx config: %w", err)
 	}
 
-	log.Println("Nginx configuration generated successfully")
+	logger.Info("Nginx configuration generated successfully")
 	return nil
 }
 
 func (a *App) handleReload() {
-	log.Println("Reloading configuration...")
+	logger.Info("Reloading configuration...")
 
 	// Try to reload configuration
 	if err := a.reload(); err != nil {
-		log.Printf("ERROR: Failed to reload configuration: %v", err)
+		logger.Error("Failed to reload configuration: %v", err)
 		a.restoreGoodConfiguration()
 		return
 	}
 
 	// Reload nginx
 	if err := a.nginxManager.Reload(); err != nil {
-		log.Printf("ERROR: Failed to reload nginx: %v", err)
+		logger.Error("Failed to reload nginx: %v", err)
 		a.restoreGoodConfiguration()
 		if err := a.nginxManager.Reload(); err != nil {
-			log.Printf("ERROR: Failed to restore nginx: %v", err)
+			logger.Error("Failed to restore nginx: %v", err)
 		}
 		return
 	}
 
 	// Check nginx health
 	if err := a.nginxManager.CheckHealth(); err != nil {
-		log.Printf("ERROR: Nginx health check failed after reload: %v", err)
+		logger.Error("Nginx health check failed after reload: %v", err)
 		a.restoreGoodConfiguration()
 		if err := a.nginxManager.Reload(); err != nil {
-			log.Printf("ERROR: Failed to restore nginx: %v", err)
+			logger.Error("Failed to restore nginx: %v", err)
 		}
 		return
 	}
 
 	// Save the new good configuration
 	a.saveGoodConfiguration()
-	log.Println("Configuration reloaded successfully")
+	logger.Info("Configuration reloaded successfully")
 }
 
 func (a *App) saveGoodConfiguration() {
 	data, err := os.ReadFile(nginxConf)
 	if err != nil {
-		log.Printf("WARNING: Failed to save good configuration: %v", err)
+		logger.Warn("Failed to save good configuration: %v", err)
 		return
 	}
 	a.lastGoodConf = string(data)
@@ -213,13 +329,13 @@ func (a *App) saveGoodConfiguration() {
 
 func (a *App) restoreGoodConfiguration() {
 	if a.lastGoodConf == "" {
-		log.Println("WARNING: No good configuration to restore")
+		logger.Warn("No good configuration to restore")
 		return
 	}
 
 	if err := os.WriteFile(nginxConf, []byte(a.lastGoodConf), 0644); err != nil {
-		log.Printf("ERROR: Failed to restore good configuration: %v", err)
+		logger.Error("Failed to restore good configuration: %v", err)
 	} else {
-		log.Println("Restored previous good configuration")
+		logger.Info("Restored previous good configuration")
 	}
 }

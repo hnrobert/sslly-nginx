@@ -2,10 +2,11 @@ package ssl
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/hnrobert/sslly-nginx/internal/logger"
 )
 
 type Certificate struct {
@@ -96,7 +97,7 @@ func ScanCertificates(sslDir string) (map[string]Certificate, error) {
 
 		// store
 		certMap[finalDomain] = Certificate{CertPath: certPath, KeyPath: keyPath}
-		log.Printf("Found certificate for domain: %s (cert: %s, key: %s)", finalDomain, certPath, keyPath)
+		logger.Info("Found certificate for domain: %s (cert: %s, key: %s)", finalDomain, certPath, keyPath)
 	}
 
 	if len(duplicates) > 0 {
