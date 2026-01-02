@@ -64,11 +64,11 @@ cors:
 
 # Example 1: Proxy to localhost (default)
 1234:
-  - example.com
-  - child.example.com
+  - yourdomain.com
+  - www.yourdomain.com
 
 # 5678:
-#   - example2.com
+#   - sub.yourdomain.com
 
 # Example 2: Proxy to another machine on LAN
 # 192.168.50.2:1234:
@@ -91,5 +91,5 @@ cors:
 # 9012:
 #   - shared.example.com
 
-# 192.168.50.2:5678/api:
+# 192.168.50.2:3456/api:
 #   - shared.example.com/api
