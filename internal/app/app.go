@@ -265,7 +265,7 @@ func (a *App) reload() error {
 	// Log warnings for domains without certificates (but don't fail)
 	for _, domains := range cfg.Ports {
 		for _, domain := range domains {
-			if _, ok := certMap[domain]; !ok {
+			if _, ok := ssl.FindCertificate(certMap, domain); !ok {
 				logger.Warn("No certificate found for domain: %s (will serve over HTTP)", domain)
 			}
 		}

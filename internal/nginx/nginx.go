@@ -338,7 +338,7 @@ http {
 
 	// Generate server blocks for each base domain
 	for baseDomain, routes := range domainRoutes {
-		cert, hasCert := certMap[baseDomain]
+		cert, hasCert := ssl.FindCertificate(certMap, baseDomain)
 		corsConfig := getCORSConfig(cfg, baseDomain)
 
 		if !hasCert {
