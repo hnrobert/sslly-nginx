@@ -17,9 +17,11 @@
         "newkey",
         "oneline",
         "pipefail",
+        "priv",
         "softprops",
         "sslly",
         "subj",
+        "tmpl",
         "venv",
         "writable",
         "yourdomain"
