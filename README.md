@@ -136,14 +136,7 @@ This generates Nginx configuration with location-based routing:
 
 ### SSL Certificate Structure
 
-Place SSL certificates in the `ssl/` directory. The application supports the following naming patterns:
-
-1. **Bundle format**: `domain_bundle.crt` and `domain_bundle.key`
-
-   - Example: `example.com_bundle.crt` and `example.com_bundle.key`
-
-2. **Standard format**: `domain.crt` and `domain.key`
-   - Example: `example.com.crt` and `example.com.key`
+Place SSL certificates in the `ssl/` directory. The application automatically matches certificate files (`.crt`) with their corresponding private key files (`.key`) based on the domain information contained within the SSL certificates.
 
 You can organize certificates in subdirectories:
 
@@ -163,7 +156,7 @@ ssl/
 
 - Each domain must have exactly one certificate (no duplicates)
 - Both `.crt` and `.key` files must exist
-- Certificates are matched by domain name automatically
+- The application reads the domain information from the certificate content itself and matches it with the corresponding key file
 - **SSL certificates are optional**: If no certificate is found for a domain, the service will proxy HTTP traffic directly
 - **HTTPS to HTTP redirect**: If HTTPS is accessed for domains without valid certificates, traffic is redirected to HTTP (301)
 
