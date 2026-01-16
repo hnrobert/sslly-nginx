@@ -2,16 +2,9 @@
 
 Place your SSL certificates in this directory. The application will recursively scan for certificate files.
 
-## Supported Certificate File Naming Patterns
+## Certificate Matching
 
-The application supports the following naming patterns for SSL certificates:
-
-1. `domain_bundle.crt` and `domain_bundle.key`
-
-   - Example: `a.com_bundle.crt` and `a.com_bundle.key`
-
-2. `domain.crt` and `domain.key`
-   - Example: `a.com.crt` and `a.com.key`
+The application automatically matches certificate files (`.crt`) with their corresponding private key files (`.key`) based on the domain information contained within the SSL certificates, regardless of the file names used.
 
 ## Directory Structure
 
@@ -35,5 +28,5 @@ ssl/
 
 - Each domain must have exactly one matching certificate (no duplicates allowed)
 - Both `.crt` and `.key` files must exist for a certificate to be valid
-- Certificate files are matched by domain name
+- The application reads the domain information from the certificate content itself and matches it with the corresponding key file
 - The application will log an error if duplicate certificates are found for the same domain
