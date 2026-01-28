@@ -49,11 +49,21 @@ Drop certificate files into the `ssl/` directory:
 ```text
 ssl/
 ├── example.com.crt
+├── example.com.pem
 ├── example.com.key
 └── api.example.com_bundle.crt
 ```
 
-**Note**: Certificate files are automatically detected and hot-reloaded. No restart required!
+Notes:
+
+- Certificates are matched to private keys; only valid certificate+key pairs will be used.
+- If multiple valid pairs exist for the same domain (including multi-domain/SAN certificates), the one with the latest expiration time is selected (ties prefer `.pem` over `.crt`).
+- At runtime, the selected certificate files are copied into a cache directory (`configs/.sslly-runtime/current/`). Nginx uses the cached files, so editing `ssl/` does not impact a running Nginx until a reload succeeds.
+**Notes**:
+
+- Certificate files are automatically detected and hot-reloaded. No restart required.
+- If multiple cert files match the same domain, selection priority is `.pem` > `.crt`.
+- Successful reloads are snapshotted under `configs/.sslly-backups/` so the next start can auto-rollback if a reload crashed the process.
 
 ## Local Build & Setup Instructions
 

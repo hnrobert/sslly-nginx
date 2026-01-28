@@ -12,6 +12,7 @@ type Watcher struct {
 	watcher *fsnotify.Watcher
 	Events  chan fsnotify.Event
 	Errors  chan error
+	done    chan struct{}
 }
 
 func New(dir string) (*Watcher, error) {
@@ -22,8 +23,9 @@ func New(dir string) (*Watcher, error) {
 
 	w := &Watcher{
 		watcher: watcher,
-		Events:  make(chan fsnotify.Event),
-		Errors:  make(chan error),
+		Events:  make(chan fsnotify.Event, 64),
+		Errors:  make(chan error, 16),
+		done:    make(chan struct{}),
 	}
 
 	// Add directory and all subdirectories
@@ -34,6 +36,7 @@ func New(dir string) (*Watcher, error) {
 
 	// Forward events
 	go func() {
+		defer close(w.done)
 		for {
 			select {
 			case event, ok := <-watcher.Events:
@@ -71,7 +74,17 @@ func (w *Watcher) addRecursive(dir string) error {
 }
 
 func (w *Watcher) Stop() {
-	w.watcher.Close()
-	close(w.Events)
-	close(w.Errors)
+	if w.watcher != nil {
+		_ = w.watcher.Close()
+	}
+	if w.done != nil {
+		<-w.done
+	}
+	// Safe to close channels after forwarder goroutine exits.
+	if w.Events != nil {
+		close(w.Events)
+	}
+	if w.Errors != nil {
+		close(w.Errors)
+	}
 }

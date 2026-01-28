@@ -20,6 +20,11 @@ func writeSelfSignedCertAndKey(t *testing.T, dir string, dnsNames []string) (cer
 
 func writeSelfSignedCertAndKeyNamed(t *testing.T, dir, certName, keyName string, dnsNames []string) (certPath, keyPath string) {
 	t.Helper()
+	return writeSelfSignedCertAndKeyNamedWithNotAfter(t, dir, certName, keyName, dnsNames, time.Now().Add(24*time.Hour))
+}
+
+func writeSelfSignedCertAndKeyNamedWithNotAfter(t *testing.T, dir, certName, keyName string, dnsNames []string, notAfter time.Time) (certPath, keyPath string) {
+	t.Helper()
 
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -41,7 +46,7 @@ func writeSelfSignedCertAndKeyNamed(t *testing.T, dir, certName, keyName string,
 			CommonName: dnsNames[0],
 		},
 		NotBefore: time.Now().Add(-time.Hour),
-		NotAfter:  time.Now().Add(24 * time.Hour),
+		NotAfter:  notAfter,
 		KeyUsage:  x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage: []x509.ExtKeyUsage{
 			x509.ExtKeyUsageServerAuth,
@@ -127,12 +132,40 @@ func TestScanCertificatesDuplicate(t *testing.T) {
 	os.MkdirAll(certDir1, 0755)
 	os.MkdirAll(certDir2, 0755)
 
-	_, _ = writeSelfSignedCertAndKey(t, certDir1, []string{"a.com"})
-	_, _ = writeSelfSignedCertAndKey(t, certDir2, []string{"a.com"})
+	// Create two certs for the same domain; selection should prefer the one
+	// with the farthest expiration time.
+	soon := time.Now().Add(24 * time.Hour)
+	later := time.Now().Add(48 * time.Hour)
+	_, _ = writeSelfSignedCertAndKeyNamedWithNotAfter(t, certDir1, "a.crt", "a.key", []string{"a.com"}, soon)
+	_, _ = writeSelfSignedCertAndKeyNamedWithNotAfter(t, certDir2, "a.pem", "a.key", []string{"a.com"}, later)
+
+	certMap, err := ScanCertificates(tmpDir)
+	if err != nil {
+		t.Fatalf("did not expect error for duplicate certificates: %v", err)
+	}
+	cert, ok := certMap["a.com"]
+	if !ok {
+		t.Fatal("expected a.com to exist in cert map")
+	}
+	if cert.NotAfter.Before(later.Add(-time.Minute)) {
+		t.Fatalf("expected the later-expiring cert to be selected, got expiry: %s", cert.NotAfter)
+	}
+}
+
+func TestScanCertificatesDuplicateAllowedSamePriority(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	certDir1 := filepath.Join(tmpDir, "one")
+	certDir2 := filepath.Join(tmpDir, "two")
+	os.MkdirAll(certDir1, 0755)
+	os.MkdirAll(certDir2, 0755)
+
+	_, _ = writeSelfSignedCertAndKeyNamed(t, certDir1, "x.pem", "x.key", []string{"dup.example.com"})
+	_, _ = writeSelfSignedCertAndKeyNamed(t, certDir2, "y.pem", "y.key", []string{"dup.example.com"})
 
 	_, err := ScanCertificates(tmpDir)
-	if err == nil {
-		t.Error("Expected error for duplicate certificates")
+	if err != nil {
+		t.Fatalf("did not expect error for duplicate certificates: %v", err)
 	}
 }
 

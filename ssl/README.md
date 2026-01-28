@@ -4,7 +4,7 @@ Place your SSL certificates in this directory. The application will recursively 
 
 ## Certificate Matching
 
-The application automatically matches certificate files (`.crt`) with their corresponding private key files (`.key`) based on the domain information contained within the SSL certificates, regardless of the file names used.
+The application automatically matches certificate files (`.pem`/`.crt`) with their corresponding private key files (`.key`) based on the domain information contained within the SSL certificates, regardless of the file names used.
 
 ## Directory Structure
 
@@ -26,7 +26,7 @@ ssl/
 
 ## Important Notes
 
-- Each domain must have exactly one matching certificate (no duplicates allowed)
-- Both `.crt` and `.key` files must exist for a certificate to be valid
+- Duplicate certificates are allowed. For each domain, only certificate+private-key pairs are considered valid; if multiple pairs match, the certificate with the farthest expiration time is selected (ties prefer `.pem` over `.crt`)
+- Private key files are optional (if no matching key is found, the domain will be served over HTTP)
 - The application reads the domain information from the certificate content itself and matches it with the corresponding key file
-- The application will log an error if duplicate certificates are found for the same domain
+- The application logs warnings when duplicates are detected and when one certificate is preferred over another

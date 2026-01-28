@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/hnrobert/sslly-nginx/internal/logger"
 )
@@ -19,6 +20,7 @@ import (
 type Certificate struct {
 	CertPath string
 	KeyPath  string
+	NotAfter time.Time
 }
 
 // ScanCertificates recursively scans the SSL directory for certificates
@@ -30,7 +32,6 @@ func ScanCertificates(sslDir string) (map[string]Certificate, error) {
 	}
 
 	certMap := make(map[string]Certificate)
-	duplicates := make(map[string][]string)
 
 	err = filepath.Walk(absSslDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -54,15 +55,25 @@ func ScanCertificates(sslDir string) (map[string]Certificate, error) {
 		if p, ok := findMatchingPrivateKeyInDir(filepath.Dir(path), leaf); ok {
 			keyPath = p
 		}
+		// Requirement: must have a matching cert+key pair to be considered valid for TLS.
+		if keyPath == "" {
+			return nil
+		}
+
+		candidate := Certificate{CertPath: path, KeyPath: keyPath, NotAfter: leaf.NotAfter}
 
 		for _, domain := range domains {
 			if prev, exists := certMap[domain]; exists {
-				// Same domain appears in multiple files -> consider duplicate.
-				duplicates[domain] = append(duplicates[domain], prev.CertPath, path)
+				if isBetterCertificate(prev, candidate) {
+					certMap[domain] = candidate
+					logger.Warn("Multiple certificates for domain %s, prefer %s (expires %s) over %s (expires %s)", domain, path, leaf.NotAfter.UTC().Format(time.RFC3339), prev.CertPath, prev.NotAfter.UTC().Format(time.RFC3339))
+				} else {
+					logger.Warn("Multiple certificates for domain %s, keep %s (expires %s), ignore %s (expires %s)", domain, prev.CertPath, prev.NotAfter.UTC().Format(time.RFC3339), path, leaf.NotAfter.UTC().Format(time.RFC3339))
+				}
 				continue
 			}
-			certMap[domain] = Certificate{CertPath: path, KeyPath: keyPath}
-			logger.Info("Found certificate for domain: %s (cert: %s, key: %s)", domain, path, keyPath)
+			certMap[domain] = candidate
+			logger.Info("Found certificate for domain: %s (cert: %s, key: %s, expires: %s)", domain, path, keyPath, leaf.NotAfter.UTC().Format(time.RFC3339))
 		}
 
 		return nil
@@ -72,13 +83,43 @@ func ScanCertificates(sslDir string) (map[string]Certificate, error) {
 		return nil, fmt.Errorf("failed to scan SSL directory: %w", err)
 	}
 
-	if len(duplicates) > 0 {
-		for domain, paths := range duplicates {
-			return nil, fmt.Errorf("duplicate certificates found for domain %s: %v", domain, paths)
-		}
+	return certMap, nil
+}
+
+func isBetterCertificate(existing Certificate, candidate Certificate) bool {
+	// Primary rule: choose the certificate that expires latest.
+	if candidate.NotAfter.After(existing.NotAfter) {
+		return true
+	}
+	if existing.NotAfter.After(candidate.NotAfter) {
+		return false
 	}
 
-	return certMap, nil
+	// Secondary rule: prefer pem > crt when expirations are equal.
+	existingPriority := certificatePathPriority(existing.CertPath)
+	candidatePriority := certificatePathPriority(candidate.CertPath)
+	if candidatePriority != existingPriority {
+		return candidatePriority > existingPriority
+	}
+
+	// Deterministic tie-breakers.
+	if !strings.EqualFold(candidate.CertPath, existing.CertPath) {
+		return strings.ToLower(candidate.CertPath) < strings.ToLower(existing.CertPath)
+	}
+	return strings.ToLower(candidate.KeyPath) < strings.ToLower(existing.KeyPath)
+}
+
+// certificatePathPriority defines precedence among duplicate certificates when other factors are equal.
+func certificatePathPriority(path string) int {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".pem":
+		return 2
+	case ".crt":
+		return 1
+	default:
+		return 0
+	}
 }
 
 // FindCertificate tries exact match first, then wildcard matches (e.g. "*.example.com").

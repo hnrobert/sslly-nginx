@@ -154,11 +154,20 @@ ssl/
 
 **Important Notes**:
 
-- Each domain must have exactly one certificate (no duplicates)
-- Both `.crt` and `.key` files must exist
+- Duplicate certificates are allowed. For each domain, only certificate+private-key pairs are considered valid; if multiple pairs match, the certificate with the farthest expiration time is selected (ties prefer `.pem` over `.crt`)
+- Certificate and key files are optional (a domain without a matched cert/key will be served over HTTP)
 - The application reads the domain information from the certificate content itself and matches it with the corresponding key file
 - **SSL certificates are optional**: If no certificate is found for a domain, the service will proxy HTTP traffic directly
 - **HTTPS to HTTP redirect**: If HTTPS is accessed for domains without valid certificates, traffic is redirected to HTTP (301)
+
+### Backup & Crash Recovery
+
+To make hot-reloads safer, `sslly-nginx` keeps a persistent on-disk snapshot of the last known-good configuration.
+
+- Backup folder: `configs/.sslly-backups/`
+- Snapshot content: `configs/` + `ssl/` + generated `/etc/nginx/nginx.conf`
+- Runtime cache: the currently used cert/key files are copied into `configs/.sslly-runtime/current/` and `nginx.conf` only references that cache, so edits under `ssl/` won't affect the running nginx process until a successful reload
+- Crash detection: if the previous run died mid-reload, the next start detects an unfinished reload and automatically restores the last known-good snapshot
 
 ### HTTP-Only Mode
 
@@ -202,7 +211,7 @@ When changes are detected:
 1. New configuration is generated
 2. Nginx configuration is tested
 3. If valid, Nginx is reloaded
-4. If invalid, the previous working configuration is restored
+4. If invalid, the previous working configuration is restored (including the on-disk `configs/` + `ssl/` contents)
 
 ### Error Handling
 
@@ -213,6 +222,22 @@ When changes are detected:
   - Logs detailed error messages
   - Restores the last working configuration
   - Continues running with previous settings
+
+## Testing
+
+Run unit tests:
+
+```bash
+go test ./...
+```
+
+Run tests with coverage:
+
+```bash
+go test ./... -coverprofile=coverage.out
+go tool cover -func=coverage.out
+go tool cover -html=coverage.out -o coverage.html
+```
 
 ### WebSocket Support
 
