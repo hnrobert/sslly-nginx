@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/hnrobert/sslly-nginx/internal/logger"
 )
 
 type Watcher struct {
@@ -66,7 +65,7 @@ func (w *Watcher) addRecursive(dir string) error {
 			if err := w.watcher.Add(path); err != nil {
 				return err
 			}
-			logger.Info("Watching directory: %s", path)
+			// logger.Info("Watching directory: %s", path)
 		}
 
 		return nil
