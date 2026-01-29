@@ -228,20 +228,6 @@ func GenerateConfig(cfg *config.Config, certMap map[string]ssl.Certificate) stri
 		httpsPort = p
 	}
 
-	// Check if any configured domains have certificates
-	hasAnyCerts := false
-	for _, domains := range cfg.Ports {
-		for _, domain := range domains {
-			if _, ok := certMap[domain]; ok {
-				hasAnyCerts = true
-				break
-			}
-		}
-		if hasAnyCerts {
-			break
-		}
-	}
-
 	// Nginx base configuration
 	sb.WriteString(`user nginx;
 worker_processes auto;
@@ -282,41 +268,6 @@ http {
 
 `)
 
-	if hasAnyCerts {
-		// If we have certificates, redirect HTTP to HTTPS
-		sb.WriteString(`    # HTTP to HTTPS redirect for all domains
-    server {
-        listen ` + httpPort + ` default_server;
-        server_name _;
-
-        location / {
-            return 301 https://$host$request_uri;
-        }
-    }
-
-`)
-	}
-
-	// Add default HTTPS server that redirects to HTTP for domains without valid certificates
-	sb.WriteString(`    # Default HTTPS server - redirect to HTTP for invalid/missing certificates
-    server {
-        listen ` + httpsPort + ` ssl default_server;
-        server_name _;
-
-        # Use a dummy self-signed certificate
-        ssl_certificate /etc/nginx/ssl/dummy.crt;
-        ssl_certificate_key /etc/nginx/ssl/dummy.key;
-
-        ssl_protocols TLSv1.2 TLSv1.3;
-        ssl_ciphers HIGH:!aNULL:!MD5;
-
-        location / {
-            return 301 http://$host$request_uri;
-        }
-    }
-
-`)
-
 	// Map: baseDomain -> []RouteConfig
 	domainRoutes := make(map[string][]RouteConfig)
 
@@ -334,6 +285,55 @@ http {
 				Path:       path,
 			})
 		}
+	}
+
+	// Collect domains with and without certificates
+	var domainsWithCerts []string
+	var domainsWithoutCerts []string
+	for baseDomain := range domainRoutes {
+		cert, hasCert := ssl.FindCertificate(certMap, baseDomain)
+		if hasCert && cert.KeyPath != "" {
+			domainsWithCerts = append(domainsWithCerts, baseDomain)
+		} else {
+			domainsWithoutCerts = append(domainsWithoutCerts, baseDomain)
+		}
+	}
+
+	// Generate HTTP → HTTPS redirect for domains with certificates
+	if len(domainsWithCerts) > 0 {
+		sb.WriteString(`    # HTTP to HTTPS redirect for domains with certificates
+    server {
+        listen ` + httpPort + `;
+        server_name ` + strings.Join(domainsWithCerts, " ") + `;
+
+        location / {
+            return 301 https://$host$request_uri;
+        }
+    }
+
+`)
+	}
+
+	// Generate HTTPS → HTTP redirect for domains without certificates
+	if len(domainsWithoutCerts) > 0 {
+		sb.WriteString(`    # HTTPS to HTTP redirect for domains without certificates
+    server {
+        listen ` + httpsPort + ` ssl;
+        server_name ` + strings.Join(domainsWithoutCerts, " ") + `;
+
+        # Use a dummy self-signed certificate
+        ssl_certificate /etc/nginx/ssl/dummy.crt;
+        ssl_certificate_key /etc/nginx/ssl/dummy.key;
+
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers HIGH:!aNULL:!MD5;
+
+        location / {
+            return 301 http://$host$request_uri;
+        }
+    }
+
+`)
 	}
 
 	// Generate server blocks for each base domain
