@@ -37,10 +37,10 @@ func (m *Manager) Start() error {
 
 	cmd := exec.Command("nginx", "-g", "daemon off;")
 	// Important: by default, os/exec discards child stdout/stderr.
-	// If nginx logs to /dev/stdout|/dev/stderr (common in containers), we must
-	// wire these streams so they appear in `docker logs`.
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	// Pipe nginx logs through our logger with [NGINX-PROCS] prefix.
+	nginxWriter := logger.NewNginxWriter()
+	cmd.Stdout = nginxWriter
+	cmd.Stderr = nginxWriter
 
 	// Start nginx in background
 	if err := cmd.Start(); err != nil {
