@@ -367,8 +367,6 @@ http {
 					proxyPass += route.Upstream.Path
 				}
 
-				logger.Warn("No certificate found for domain: %s, serving over HTTP only (upstream: %s://%s, path: %s)", baseDomain, route.Upstream.Scheme, upstreamAddr, locationPath)
-
 				sb.WriteString(fmt.Sprintf(`        location %s {
             proxy_pass %s;
             proxy_http_version 1.1;
@@ -402,7 +400,6 @@ http {
 		}
 
 		// Certificate found - create HTTPS server block
-		logger.Info("Found certificate for domain: %s", baseDomain)
 		sb.WriteString(fmt.Sprintf(`    # HTTPS server block for %s
     server {
         listen %s ssl;

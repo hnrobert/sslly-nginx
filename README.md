@@ -225,6 +225,8 @@ On startup and after every successful reload, the service prints a single domain
 
 Domains inside each block are sorted by comparing labels from TLD to left (e.g. compare `de` before `abc` in `abc.de`), and each label is compared by Unicode order. If all compared labels match, the shorter domain sorts first.
 
+Each domain line also prints its upstream destination(s) in the form `domain -> scheme://host:port[/path]`.
+
 Example order:
 
 ```text
