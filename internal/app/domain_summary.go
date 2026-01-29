@@ -24,19 +24,19 @@ type multipleCertEntry struct {
 }
 
 func logDomainSummary(cfg *config.Config, activeCertMap map[string]ssl.Certificate, report ssl.ScanReport, now time.Time) {
-	success, missing, expired := classifyDomains(cfg, activeCertMap, now)
+	matched, missing, expired := classifyDomains(cfg, activeCertMap, now)
 	multiple := classifyMultipleCertificates(cfg, report)
-	all := len(success) + len(missing) + len(expired)
+	all := len(matched) + len(missing) + len(expired)
 
-	logger.Info("Domain summary: total=%d matched=%d warning(no-cert)=%d warning(expired)=%d", all, len(success), len(missing), len(expired))
+	logger.Info("Domain summary: total=%d matched=%d warning(no-cert)=%d warning(expired)=%d", all, len(matched), len(missing), len(expired))
 	if all == 0 {
 		return
 	}
 
-	logger.Info("%s", formatDomainSection("Success:", success))
+	logger.Info("%s", formatDomainSection("Matched:", matched))
 	logger.Warn("%s", formatDomainSection("No-cert:", missing))
 	logger.Warn("%s", formatDomainSection("Expired:", expired))
-	logger.Warn("%s", formatMultipleCertSection("Multi-certs:", multiple))
+	logger.Warn("%s", formatMultipleCertSection("Multiple-certs:", multiple))
 }
 
 func formatDomainSection(header string, entries []domainEntry) string {
@@ -80,14 +80,14 @@ func formatMultipleCertSection(header string, entries []multipleCertEntry) strin
 			}
 		}
 		if e.Ignored > 0 {
-			line += fmt.Sprintf(" (ignored: %d)", e.Ignored)
+			line += fmt.Sprintf(" (ignored other %d)", e.Ignored)
 		}
 		b.WriteString(line)
 	}
 	return b.String()
 }
 
-func classifyDomains(cfg *config.Config, activeCertMap map[string]ssl.Certificate, now time.Time) (success, missing, expired []domainEntry) {
+func classifyDomains(cfg *config.Config, activeCertMap map[string]ssl.Certificate, now time.Time) (matched, missing, expired []domainEntry) {
 	baseDomains := collectBaseDomains(cfg)
 	dests := collectDomainDestinations(cfg)
 
@@ -102,13 +102,13 @@ func classifyDomains(cfg *config.Config, activeCertMap map[string]ssl.Certificat
 			expired = append(expired, entry)
 			continue
 		}
-		success = append(success, entry)
+		matched = append(matched, entry)
 	}
 
-	sortDomainEntriesInPlace(success)
+	sortDomainEntriesInPlace(matched)
 	sortDomainEntriesInPlace(missing)
 	sortDomainEntriesInPlace(expired)
-	return success, missing, expired
+	return matched, missing, expired
 }
 
 func sortDomainEntriesInPlace(entries []domainEntry) {

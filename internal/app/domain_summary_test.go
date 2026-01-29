@@ -69,9 +69,9 @@ func TestClassifyDomains_SuccessMissingExpired(t *testing.T) {
 		},
 	}
 
-	success, missing, expired := classifyDomains(cfg, active, now)
-	if len(success) != 2 {
-		t.Fatalf("success: got %v", success)
+	matched, missing, expired := classifyDomains(cfg, active, now)
+	if len(matched) != 2 {
+		t.Fatalf("matched: got %v", matched)
 	}
 	if len(missing) != 1 || missing[0].Domain != "missing.de" {
 		t.Fatalf("missing: got %v", missing)
@@ -81,18 +81,18 @@ func TestClassifyDomains_SuccessMissingExpired(t *testing.T) {
 	}
 
 	// Success list should be sorted by the domain comparator.
-	if success[0].Domain != "abc.az" || success[1].Domain != "abc.de" {
-		t.Fatalf("sorted success mismatch: got %v", success)
+	if matched[0].Domain != "abc.az" || matched[1].Domain != "abc.de" {
+		t.Fatalf("sorted success mismatch: got %v", matched)
 	}
 
 	// Ensure destinations are included and include scheme/host/port/path.
-	if len(success[1].Destinations) == 0 {
-		t.Fatalf("expected destinations for %s", success[1].Domain)
+	if len(matched[1].Destinations) == 0 {
+		t.Fatalf("expected destinations for %s", matched[1].Domain)
 	}
 	// From 1234 default config.ParseUpstream should be http://127.0.0.1:1234
 	foundHTTP := false
 	foundIPv6HTTPS := false
-	for _, d := range success[1].Destinations {
+	for _, d := range matched[1].Destinations {
 		if d == "http://127.0.0.1:1234" {
 			foundHTTP = true
 		}
@@ -101,10 +101,10 @@ func TestClassifyDomains_SuccessMissingExpired(t *testing.T) {
 		}
 	}
 	if !foundHTTP {
-		t.Fatalf("expected http destination in %v", success[1].Destinations)
+		t.Fatalf("expected http destination in %v", matched[1].Destinations)
 	}
 	if !foundIPv6HTTPS {
-		t.Fatalf("expected ipv6 https destination in %v", success[1].Destinations)
+		t.Fatalf("expected ipv6 https destination in %v", matched[1].Destinations)
 	}
 }
 
