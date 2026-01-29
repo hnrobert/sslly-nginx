@@ -119,7 +119,7 @@ func (m *Manager) Abort(id string) error {
 	return nil
 }
 
-// Commit captures the current runtime configuration (configs + ssl + nginx.conf) into the snapshot,
+// Commit captures the current runtime configuration into the snapshot,
 // then promotes it to last-good and clears the in-progress marker.
 func (m *Manager) Commit(id string) error {
 	m.mu.Lock()
@@ -230,19 +230,10 @@ func (m *Manager) RestoreLastGood() error {
 
 func (m *Manager) restoreSnapshotLocked(id string) error {
 	snapDir := m.snapshotPath(id)
-	cfgSrc := filepath.Join(snapDir, "configs")
-	sslSrc := filepath.Join(snapDir, "ssl")
 	runtimeSrc := filepath.Join(snapDir, "runtime")
 	nginxSrc := filepath.Join(snapDir, "nginx", "nginx.conf")
 
-	// Keep backup folder under config dir.
-	keep := map[string]bool{filepath.Base(m.backupRoot): true}
-	if err := replaceDirContents(m.configDir, cfgSrc, keep); err != nil {
-		return fmt.Errorf("restore configs: %w", err)
-	}
-	if err := replaceDirContents(m.sslDir, sslSrc, nil); err != nil {
-		return fmt.Errorf("restore ssl: %w", err)
-	}
+	// Rollback is limited to the runtime cache directory and nginx.conf.
 	if err := replaceDirContents(m.runtimeDir, runtimeSrc, nil); err != nil {
 		return fmt.Errorf("restore runtime: %w", err)
 	}

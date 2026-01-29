@@ -652,8 +652,8 @@ func (a *App) saveGoodConfiguration() {
 }
 
 func (a *App) restoreGoodConfiguration() {
-	// Prefer restoring the last-good snapshot so the on-disk config/ssl also matches
-	// what nginx is currently serving.
+	// Prefer restoring the last-good snapshot. Snapshot restores are intentionally
+	// limited to the runtime cache and nginx.conf (never user-owned configs/ or ssl/).
 	if a.backupManager != nil {
 		if err := a.backupManager.RestoreLastGood(); err == nil {
 			logger.Info("Restored previous good configuration snapshot")

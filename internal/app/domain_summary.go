@@ -33,7 +33,7 @@ func logDomainSummary(cfg *config.Config, activeCertMap map[string]ssl.Certifica
 		return
 	}
 
-	logDomainSectionInfo("Success:", success)
+	logDomainSectionInfo("Matched:", success)
 	logDomainSectionWarn("No-cert:", missing)
 	logDomainSectionWarn("Expired:", expired)
 	logMultipleCertSectionWarn("Multi-certs:", multiple)

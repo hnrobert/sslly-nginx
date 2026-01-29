@@ -219,7 +219,7 @@ When changes are detected:
 
 On startup and after every successful reload, the service prints a single domain summary instead of logging domain status one-by-one.
 
-- `Success:` (INFO) domains with a valid certificate+key and the certificate is not expired
+- `Matched:` (INFO) domains with a valid certificate+key and the certificate is not expired
 - `No-cert:` (WARN) domains with no matched certificate+key (served over HTTP)
 - `Expired:` (WARN) domains with a matched certificate+key, but the certificate is expired
 - `Multi-certs:` (WARN) domains where multiple certificate candidates were found; the selected certificate path is shown along with the ignored count

@@ -85,16 +85,16 @@ func TestCrashRecoveryRestoresLastGood(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read config: %v", err)
 	}
-	if string(gotCfg) != string(goodConfig) {
-		t.Fatalf("config not restored, got: %q", string(gotCfg))
+	if string(gotCfg) == string(goodConfig) {
+		t.Fatalf("config unexpectedly restored; rollback must not modify user configs")
 	}
 
 	gotSSL, err := os.ReadFile(filepath.Join(sslDir, "note.txt"))
 	if err != nil {
 		t.Fatalf("read ssl: %v", err)
 	}
-	if string(gotSSL) != "good" {
-		t.Fatalf("ssl not restored, got: %q", string(gotSSL))
+	if string(gotSSL) == "good" {
+		t.Fatalf("ssl unexpectedly restored; rollback must not modify user ssl")
 	}
 
 	gotNginx, err := os.ReadFile(nginxConf)
