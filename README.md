@@ -206,6 +206,8 @@ The application watches for changes in:
 - Configuration files (`./configs/config.yaml` or `./configs/config.yml`)
 - SSL certificates (`./ssl/**/*`)
 
+Note: internal state folders under `configs/` (like `configs/.sslly-backups/` and `configs/.sslly-runtime/`) are ignored by the watcher to avoid feedback loops.
+
 When changes are detected:
 
 1. New configuration is generated

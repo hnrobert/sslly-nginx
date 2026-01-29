@@ -3,6 +3,7 @@ package watcher
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/fsnotify/fsnotify"
 )
@@ -62,6 +63,9 @@ func (w *Watcher) addRecursive(dir string) error {
 		}
 
 		if info.IsDir() {
+			if shouldSkipWatchDir(path) {
+				return filepath.SkipDir
+			}
 			if err := w.watcher.Add(path); err != nil {
 				return err
 			}
@@ -86,4 +90,22 @@ func (w *Watcher) Stop() {
 	if w.Errors != nil {
 		close(w.Errors)
 	}
+}
+
+func shouldSkipWatchDir(path string) bool {
+	// Normalize separators so checks work across platforms.
+	p := filepath.ToSlash(path)
+
+	// Ignore internal runtime/backup folders to avoid feedback loops and excessive watches.
+	// We match by path segment so nested snapshots are also excluded.
+	ignoredSegments := []string{"/.sslly-backups/", "/.sslly-runtime/", "/.git/"}
+	for _, seg := range ignoredSegments {
+		if strings.Contains(p, seg) {
+			return true
+		}
+	}
+
+	// Also ignore the directory itself if it ends with those names (walk may call with no trailing slash).
+	base := filepath.Base(p)
+	return base == ".sslly-backups" || base == ".sslly-runtime" || base == ".git"
 }

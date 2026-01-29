@@ -257,6 +257,9 @@ func (a *App) setupWatchers() error {
 				if !ok {
 					return
 				}
+				if isInternalConfigPath(event.Name) {
+					continue
+				}
 				if event.Op&fsnotify.Write == fsnotify.Write || event.Op&fsnotify.Create == fsnotify.Create {
 					logger.Info("Config file changed: %s", event.Name)
 					a.handleReload()
@@ -294,6 +297,11 @@ func (a *App) setupWatchers() error {
 	}()
 
 	return nil
+}
+
+func isInternalConfigPath(p string) bool {
+	pp := filepath.ToSlash(p)
+	return strings.Contains(pp, "/.sslly-backups/") || strings.Contains(pp, "/.sslly-runtime/")
 }
 
 func (a *App) reload(snapshotID string) error {
