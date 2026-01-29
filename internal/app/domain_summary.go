@@ -33,49 +33,45 @@ func logDomainSummary(cfg *config.Config, activeCertMap map[string]ssl.Certifica
 		return
 	}
 
-	logDomainSectionInfo("Matched:", success)
-	logDomainSectionWarn("No-cert:", missing)
-	logDomainSectionWarn("Expired:", expired)
-	logMultipleCertSectionWarn("Multi-certs:", multiple)
+	logger.Info("%s", formatDomainSection("Success:", success))
+	logger.Warn("%s", formatDomainSection("No-cert:", missing))
+	logger.Warn("%s", formatDomainSection("Expired:", expired))
+	logger.Warn("%s", formatMultipleCertSection("Multi-certs:", multiple))
 }
 
-func logDomainSectionInfo(header string, entries []domainEntry) {
-	logger.Info(header)
+func formatDomainSection(header string, entries []domainEntry) string {
+	var b strings.Builder
+	b.WriteString(header)
+	b.WriteByte('\n')
 	if len(entries) == 0 {
-		logger.Info("  (none)")
-		return
+		b.WriteString("  (none)")
+		return b.String()
 	}
-	for _, e := range entries {
+	for i, e := range entries {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
 		line := "  - " + e.Domain
 		if len(e.Destinations) > 0 {
 			line += " -> " + strings.Join(e.Destinations, ", ")
 		}
-		logger.Info(line)
+		b.WriteString(line)
 	}
+	return b.String()
 }
 
-func logDomainSectionWarn(header string, entries []domainEntry) {
-	logger.Warn(header)
+func formatMultipleCertSection(header string, entries []multipleCertEntry) string {
+	var b strings.Builder
+	b.WriteString(header)
+	b.WriteByte('\n')
 	if len(entries) == 0 {
-		logger.Warn("  (none)")
-		return
+		b.WriteString("  (none)")
+		return b.String()
 	}
-	for _, e := range entries {
-		line := "  - " + e.Domain
-		if len(e.Destinations) > 0 {
-			line += " -> " + strings.Join(e.Destinations, ", ")
+	for i, e := range entries {
+		if i > 0 {
+			b.WriteByte('\n')
 		}
-		logger.Warn(line)
-	}
-}
-
-func logMultipleCertSectionWarn(header string, entries []multipleCertEntry) {
-	logger.Warn(header)
-	if len(entries) == 0 {
-		logger.Warn("  (none)")
-		return
-	}
-	for _, e := range entries {
 		line := "  - " + e.Domain
 		if e.Selected != "" {
 			line += " -> " + e.Selected
@@ -86,8 +82,9 @@ func logMultipleCertSectionWarn(header string, entries []multipleCertEntry) {
 		if e.Ignored > 0 {
 			line += fmt.Sprintf(" (ignored: %d)", e.Ignored)
 		}
-		logger.Warn(line)
+		b.WriteString(line)
 	}
+	return b.String()
 }
 
 func classifyDomains(cfg *config.Config, activeCertMap map[string]ssl.Certificate, now time.Time) (success, missing, expired []domainEntry) {
