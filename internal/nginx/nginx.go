@@ -367,6 +367,22 @@ http {
 					proxyPass += route.Upstream.Path
 				}
 
+				// For non-root paths, add redirect and use trailing slash
+				if locationPath != "/" {
+					// Add exact match redirect for path without trailing slash
+					sb.WriteString(fmt.Sprintf(`        location = %s {
+            return 301 $scheme://$host%s/;
+        }
+
+`, locationPath, locationPath))
+					// Use path with trailing slash for the actual location
+					locationPath = locationPath + "/"
+					// Add trailing slash to proxy_pass to strip the location path
+					if !strings.HasSuffix(proxyPass, "/") {
+						proxyPass += "/"
+					}
+				}
+
 				sb.WriteString(fmt.Sprintf(`        location %s {
             proxy_pass %s;
             proxy_http_version 1.1;
@@ -425,6 +441,22 @@ http {
 			proxyPass := fmt.Sprintf("%s://%s", route.Upstream.Scheme, upstreamAddr)
 			if route.Upstream.Path != "" {
 				proxyPass += route.Upstream.Path
+			}
+
+			// For non-root paths, add redirect and use trailing slash
+			if locationPath != "/" {
+				// Add exact match redirect for path without trailing slash
+				sb.WriteString(fmt.Sprintf(`        location = %s {
+            return 301 $scheme://$host%s/;
+        }
+
+`, locationPath, locationPath))
+				// Use path with trailing slash for the actual location
+				locationPath = locationPath + "/"
+				// Add trailing slash to proxy_pass to strip the location path
+				if !strings.HasSuffix(proxyPass, "/") {
+					proxyPass += "/"
+				}
 			}
 
 			// logger.Info("  Route: %s -> %s://%s (path: %s)", route.DomainPath, route.Upstream.Scheme, upstreamAddr, locationPath)
