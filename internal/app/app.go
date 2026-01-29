@@ -33,6 +33,7 @@ type App struct {
 	config        *config.Config
 	nginxManager  *nginx.Manager
 	lastGoodConf  string
+	activeCertMap map[string]ssl.Certificate
 	backupManager *backup.Manager
 	reloadMu      sync.Mutex
 }
@@ -107,6 +108,9 @@ func (a *App) Start() error {
 			logger.Warn("failed to commit startup snapshot: %v", err)
 		}
 	}
+
+	// Print a single summary after everything is successfully applied.
+	logDomainSummary(a.config, a.activeCertMap, time.Now())
 
 	// Save the good configuration
 	a.saveGoodConfiguration()
@@ -315,12 +319,8 @@ func (a *App) reload(snapshotID string) error {
 		return fmt.Errorf("failed to stage runtime certificates: %w", err)
 	}
 
-	// Log warnings for domains without certificates (but don't fail)
-	for baseDomain := range collectBaseDomains(cfg) {
-		if _, ok := activeCertMap[baseDomain]; !ok {
-			logger.Warn("No certificate found for domain: %s (will serve over HTTP)", baseDomain)
-		}
-	}
+	// Keep the latest active cert map for summarized logging.
+	a.activeCertMap = activeCertMap
 
 	// Generate nginx configuration
 	nginxConfig := nginx.GenerateConfig(cfg, activeCertMap)
@@ -354,7 +354,7 @@ func collectBaseDomains(cfg *config.Config) map[string]struct{} {
 			if idx := strings.Index(base, "/"); idx > 0 {
 				base = base[:idx]
 			}
-			base = strings.TrimSpace(base)
+			base = strings.ToLower(strings.TrimSpace(base))
 			if base == "" {
 				continue
 			}
@@ -596,6 +596,8 @@ func (a *App) handleReload() {
 
 	// Save the new good configuration
 	a.saveGoodConfiguration()
+
+	logDomainSummary(a.config, a.activeCertMap, time.Now())
 	logger.Info("Configuration reloaded successfully")
 }
 

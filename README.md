@@ -213,6 +213,27 @@ When changes are detected:
 3. If valid, Nginx is reloaded
 4. If invalid, the previous working configuration is restored (including the on-disk `configs/` + `ssl/` contents)
 
+### Logs: Domain Summary
+
+On startup and after every successful reload, the service prints a single domain summary instead of logging domain status one-by-one.
+
+- `success`: domains with a valid certificate+key and the certificate is not expired
+- `warning(no-cert)`: domains with no matched certificate+key (served over HTTP)
+- `warning(expired)`: domains with a matched certificate+key, but the certificate is expired
+
+Domains inside each block are sorted by comparing labels from TLD to left (e.g. compare `de` before `abc` in `abc.de`), and each label is compared by Unicode order. If all compared labels match, the shorter domain sorts first.
+
+Example order:
+
+```text
+abc.az
+abc.de
+abc.abc.de
+aad.def
+abc.def
+abc.abc.def
+```
+
 ### Error Handling
 
 - **Initial Startup**:

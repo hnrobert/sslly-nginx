@@ -59,6 +59,10 @@ Notes:
 - Certificates are matched to private keys; only valid certificate+key pairs will be used.
 - If multiple valid pairs exist for the same domain (including multi-domain/SAN certificates), the one with the latest expiration time is selected (ties prefer `.pem` over `.crt`).
 - At runtime, the selected certificate files are copied into a cache directory (`configs/.sslly-runtime/current/`). Nginx uses the cached files, so editing `ssl/` does not impact a running Nginx until a reload succeeds.
+
+### Logs
+
+On startup and after each successful reload, `sslly-nginx` prints a single domain summary grouped into `success`, `warning(no-cert)`, and `warning(expired)`.
 **Notes**:
 
 - Certificate files are automatically detected and hot-reloaded. No restart required.

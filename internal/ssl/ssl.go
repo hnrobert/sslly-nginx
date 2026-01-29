@@ -73,7 +73,6 @@ func ScanCertificates(sslDir string) (map[string]Certificate, error) {
 				continue
 			}
 			certMap[domain] = candidate
-			logger.Info("Found certificate for domain: %s (cert: %s, key: %s, expires: %s)", domain, path, keyPath, leaf.NotAfter.UTC().Format(time.RFC3339))
 		}
 
 		return nil
@@ -82,6 +81,8 @@ func ScanCertificates(sslDir string) (map[string]Certificate, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan SSL directory: %w", err)
 	}
+
+	logger.Info("SSL scan completed: %d domains have valid certificate+key pairs", len(certMap))
 
 	return certMap, nil
 }
