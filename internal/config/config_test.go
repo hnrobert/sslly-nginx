@@ -200,6 +200,30 @@ func TestParseUpstream(t *testing.T) {
 			wantPort:   "8443",
 			wantPath:   "",
 		},
+		{
+			name:       "Domain name without port (http)",
+			input:      "www.example.com",
+			wantScheme: "http",
+			wantHost:   "www.example.com",
+			wantPort:   "80",
+			wantPath:   "",
+		},
+		{
+			name:       "Domain name without port (https)",
+			input:      "[https]www.baidu.com",
+			wantScheme: "https",
+			wantHost:   "www.baidu.com",
+			wantPort:   "443",
+			wantPath:   "",
+		},
+		{
+			name:       "Domain name with path (https)",
+			input:      "[https]api.example.com/v1",
+			wantScheme: "https",
+			wantHost:   "api.example.com",
+			wantPort:   "443",
+			wantPath:   "/v1",
+		},
 	}
 
 	for _, tt := range tests {

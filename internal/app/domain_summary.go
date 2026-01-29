@@ -99,18 +99,45 @@ func classifyDomains(cfg *config.Config, activeCertMap map[string]ssl.Certificat
 	baseDomains := collectBaseDomains(cfg)
 	dests := collectDomainDestinations(cfg)
 
+	// Build a map from baseDomain to all its domainPaths
+	domainPaths := make(map[string][]string)
+	if cfg != nil {
+		for _, paths := range cfg.Ports {
+			for _, domainPath := range paths {
+				base := domainPath
+				if idx := strings.Index(base, "/"); idx > 0 {
+					base = base[:idx]
+				}
+				base = strings.ToLower(strings.TrimSpace(base))
+				if base == "" {
+					continue
+				}
+				key := strings.ToLower(strings.TrimSpace(domainPath))
+				domainPaths[base] = append(domainPaths[base], key)
+			}
+		}
+	}
+
 	for domain := range baseDomains {
 		cert, ok := activeCertMap[domain]
-		entry := domainEntry{Domain: domain, Destinations: dests[domain]}
-		if !ok {
-			missing = append(missing, entry)
-			continue
+		paths := domainPaths[domain]
+		if len(paths) == 0 {
+			paths = []string{domain}
 		}
-		if !cert.NotAfter.IsZero() && !cert.NotAfter.After(now) {
-			expired = append(expired, entry)
-			continue
+
+		for _, domainPath := range paths {
+			destinations := dests[domainPath]
+			entry := domainEntry{Domain: domainPath, Destinations: destinations}
+			if !ok {
+				missing = append(missing, entry)
+				continue
+			}
+			if !cert.NotAfter.IsZero() && !cert.NotAfter.After(now) {
+				expired = append(expired, entry)
+				continue
+			}
+			matched = append(matched, entry)
 		}
-		matched = append(matched, entry)
 	}
 
 	sortDomainEntriesInPlace(matched)
@@ -196,28 +223,25 @@ func collectDomainDestinations(cfg *config.Config) map[string][]string {
 		up := config.ParseUpstream(portKey)
 		dest := formatUpstreamDestination(up)
 		for _, domainPath := range domainPaths {
-			base := domainPath
-			if idx := strings.Index(base, "/"); idx > 0 {
-				base = base[:idx]
-			}
-			base = strings.ToLower(strings.TrimSpace(base))
-			if base == "" {
+			// Use full domainPath as key to preserve path information
+			key := strings.ToLower(strings.TrimSpace(domainPath))
+			if key == "" {
 				continue
 			}
-			if _, ok := seen[base]; !ok {
-				seen[base] = make(map[string]struct{})
+			if _, ok := seen[key]; !ok {
+				seen[key] = make(map[string]struct{})
 			}
-			seen[base][dest] = struct{}{}
+			seen[key][dest] = struct{}{}
 		}
 	}
 
-	for domain, m := range seen {
+	for domainPath, m := range seen {
 		var list []string
 		for d := range m {
 			list = append(list, d)
 		}
 		sort.Strings(list)
-		out[domain] = list
+		out[domainPath] = list
 	}
 	return out
 }
