@@ -23,15 +23,51 @@ type Certificate struct {
 	NotAfter time.Time
 }
 
-// ScanCertificates recursively scans the SSL directory for certificates
-func ScanCertificates(sslDir string) (map[string]Certificate, error) {
+type MultipleCertificateReport struct {
+	Selected Certificate
+	All      []Certificate
+}
+
+type ScanReport struct {
+	Multiple map[string]*MultipleCertificateReport
+}
+
+func (r *ScanReport) recordCandidate(domain string, currentSelected Certificate, candidate Certificate, replaced bool) {
+	if r.Multiple == nil {
+		r.Multiple = make(map[string]*MultipleCertificateReport)
+	}
+	rep, ok := r.Multiple[domain]
+	if !ok {
+		rep = &MultipleCertificateReport{Selected: currentSelected, All: []Certificate{currentSelected}}
+		r.Multiple[domain] = rep
+	}
+
+	appendUnique := func(c Certificate) {
+		for _, existing := range rep.All {
+			if strings.EqualFold(existing.CertPath, c.CertPath) && strings.EqualFold(existing.KeyPath, c.KeyPath) {
+				return
+			}
+		}
+		rep.All = append(rep.All, c)
+	}
+
+	appendUnique(candidate)
+	if replaced {
+		rep.Selected = candidate
+	}
+}
+
+// ScanCertificatesWithReport recursively scans the SSL directory for certificates and returns
+// a report of duplicate-certificate decisions.
+func ScanCertificatesWithReport(sslDir string) (map[string]Certificate, ScanReport, error) {
 	// Convert sslDir to absolute path first
 	absSslDir, err := filepath.Abs(sslDir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get absolute path for SSL directory: %w", err)
+		return nil, ScanReport{}, fmt.Errorf("failed to get absolute path for SSL directory: %w", err)
 	}
 
 	certMap := make(map[string]Certificate)
+	report := ScanReport{}
 
 	err = filepath.Walk(absSslDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -64,11 +100,10 @@ func ScanCertificates(sslDir string) (map[string]Certificate, error) {
 
 		for _, domain := range domains {
 			if prev, exists := certMap[domain]; exists {
-				if isBetterCertificate(prev, candidate) {
+				replaced := isBetterCertificate(prev, candidate)
+				report.recordCandidate(domain, prev, candidate, replaced)
+				if replaced {
 					certMap[domain] = candidate
-					logger.Warn("Multiple certificates for domain %s, prefer %s (expires %s) over %s (expires %s)", domain, path, leaf.NotAfter.UTC().Format(time.RFC3339), prev.CertPath, prev.NotAfter.UTC().Format(time.RFC3339))
-				} else {
-					logger.Warn("Multiple certificates for domain %s, keep %s (expires %s), ignore %s (expires %s)", domain, prev.CertPath, prev.NotAfter.UTC().Format(time.RFC3339), path, leaf.NotAfter.UTC().Format(time.RFC3339))
 				}
 				continue
 			}
@@ -79,12 +114,18 @@ func ScanCertificates(sslDir string) (map[string]Certificate, error) {
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to scan SSL directory: %w", err)
+		return nil, ScanReport{}, fmt.Errorf("failed to scan SSL directory: %w", err)
 	}
 
 	logger.Info("SSL scan completed: %d domains have valid certificate+key pairs", len(certMap))
 
-	return certMap, nil
+	return certMap, report, nil
+}
+
+// ScanCertificates recursively scans the SSL directory for certificates.
+func ScanCertificates(sslDir string) (map[string]Certificate, error) {
+	certs, _, err := ScanCertificatesWithReport(sslDir)
+	return certs, err
 }
 
 func isBetterCertificate(existing Certificate, candidate Certificate) bool {

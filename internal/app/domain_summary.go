@@ -16,39 +16,78 @@ type domainEntry struct {
 	Destinations []string
 }
 
-func logDomainSummary(cfg *config.Config, activeCertMap map[string]ssl.Certificate, now time.Time) {
+type multipleCertEntry struct {
+	Domain   string
+	Selected string
+	NotAfter time.Time
+	Ignored  int
+}
+
+func logDomainSummary(cfg *config.Config, activeCertMap map[string]ssl.Certificate, report ssl.ScanReport, now time.Time) {
 	success, missing, expired := classifyDomains(cfg, activeCertMap, now)
+	multiple := classifyMultipleCertificates(cfg, report)
 	all := len(success) + len(missing) + len(expired)
 
-	logger.Info("Domain summary: total=%d success=%d warning(no-cert)=%d warning(expired)=%d", all, len(success), len(missing), len(expired))
+	logger.Info("Domain summary: total=%d matched=%d warning(no-cert)=%d warning(expired)=%d", all, len(success), len(missing), len(expired))
 	if all == 0 {
 		return
 	}
 
-	logger.Info(formatDomainBlock("success", success))
-	if len(missing) > 0 {
-		logger.Warn(formatDomainBlock("warning(no-cert)", missing))
+	logDomainSectionInfo("Success:", success)
+	logDomainSectionWarn("No-cert:", missing)
+	logDomainSectionWarn("Expired:", expired)
+	logMultipleCertSectionWarn("Multi-certs:", multiple)
+}
+
+func logDomainSectionInfo(header string, entries []domainEntry) {
+	logger.Info(header)
+	if len(entries) == 0 {
+		logger.Info("  (none)")
+		return
 	}
-	if len(expired) > 0 {
-		logger.Warn(formatDomainBlock("warning(expired)", expired))
+	for _, e := range entries {
+		line := "  - " + e.Domain
+		if len(e.Destinations) > 0 {
+			line += " -> " + strings.Join(e.Destinations, ", ")
+		}
+		logger.Info(line)
 	}
 }
 
-func formatDomainBlock(title string, entries []domainEntry) string {
+func logDomainSectionWarn(header string, entries []domainEntry) {
+	logger.Warn(header)
 	if len(entries) == 0 {
-		return fmt.Sprintf("%s: (none)", title)
+		logger.Warn("  (none)")
+		return
 	}
-	var b strings.Builder
-	b.WriteString(fmt.Sprintf("%s (%d):", title, len(entries)))
 	for _, e := range entries {
-		b.WriteString("\n  - ")
-		b.WriteString(e.Domain)
+		line := "  - " + e.Domain
 		if len(e.Destinations) > 0 {
-			b.WriteString(" -> ")
-			b.WriteString(strings.Join(e.Destinations, ", "))
+			line += " -> " + strings.Join(e.Destinations, ", ")
 		}
+		logger.Warn(line)
 	}
-	return b.String()
+}
+
+func logMultipleCertSectionWarn(header string, entries []multipleCertEntry) {
+	logger.Warn(header)
+	if len(entries) == 0 {
+		logger.Warn("  (none)")
+		return
+	}
+	for _, e := range entries {
+		line := "  - " + e.Domain
+		if e.Selected != "" {
+			line += " -> " + e.Selected
+			if !e.NotAfter.IsZero() {
+				line += " (expires: " + e.NotAfter.UTC().Format(time.RFC3339) + ")"
+			}
+		}
+		if e.Ignored > 0 {
+			line += fmt.Sprintf(" (ignored: %d)", e.Ignored)
+		}
+		logger.Warn(line)
+	}
 }
 
 func classifyDomains(cfg *config.Config, activeCertMap map[string]ssl.Certificate, now time.Time) (success, missing, expired []domainEntry) {
@@ -79,6 +118,35 @@ func sortDomainEntriesInPlace(entries []domainEntry) {
 	sort.Slice(entries, func(i, j int) bool {
 		return domainLess(entries[i].Domain, entries[j].Domain)
 	})
+}
+
+func classifyMultipleCertificates(cfg *config.Config, report ssl.ScanReport) []multipleCertEntry {
+	baseDomains := collectBaseDomains(cfg)
+	if len(baseDomains) == 0 || len(report.Multiple) == 0 {
+		return nil
+	}
+
+	var out []multipleCertEntry
+	for domain, rep := range report.Multiple {
+		d := strings.ToLower(strings.TrimSpace(domain))
+		if _, ok := baseDomains[d]; !ok {
+			continue
+		}
+		selected := rep.Selected.CertPath
+		ignored := 0
+		if n := len(rep.All); n > 1 {
+			ignored = n - 1
+		}
+		out = append(out, multipleCertEntry{
+			Domain:   d,
+			Selected: selected,
+			NotAfter: rep.Selected.NotAfter,
+			Ignored:  ignored,
+		})
+	}
+
+	sort.Slice(out, func(i, j int) bool { return domainLess(out[i].Domain, out[j].Domain) })
+	return out
 }
 
 // domainLess sorts by labels from TLD -> left, comparing each label by Unicode codepoint.

@@ -139,7 +139,7 @@ func TestScanCertificatesDuplicate(t *testing.T) {
 	_, _ = writeSelfSignedCertAndKeyNamedWithNotAfter(t, certDir1, "a.crt", "a.key", []string{"a.com"}, soon)
 	_, _ = writeSelfSignedCertAndKeyNamedWithNotAfter(t, certDir2, "a.pem", "a.key", []string{"a.com"}, later)
 
-	certMap, err := ScanCertificates(tmpDir)
+	certMap, report, err := ScanCertificatesWithReport(tmpDir)
 	if err != nil {
 		t.Fatalf("did not expect error for duplicate certificates: %v", err)
 	}
@@ -149,6 +149,19 @@ func TestScanCertificatesDuplicate(t *testing.T) {
 	}
 	if cert.NotAfter.Before(later.Add(-time.Minute)) {
 		t.Fatalf("expected the later-expiring cert to be selected, got expiry: %s", cert.NotAfter)
+	}
+	if report.Multiple == nil {
+		t.Fatalf("expected report.Multiple to be populated")
+	}
+	rep, ok := report.Multiple["a.com"]
+	if !ok {
+		t.Fatalf("expected a.com to be reported as multiple")
+	}
+	if rep.Selected.CertPath != cert.CertPath {
+		t.Fatalf("report selected mismatch: got %s want %s", rep.Selected.CertPath, cert.CertPath)
+	}
+	if len(rep.All) < 2 {
+		t.Fatalf("expected >=2 candidates, got %d", len(rep.All))
 	}
 }
 
@@ -163,9 +176,15 @@ func TestScanCertificatesDuplicateAllowedSamePriority(t *testing.T) {
 	_, _ = writeSelfSignedCertAndKeyNamed(t, certDir1, "x.pem", "x.key", []string{"dup.example.com"})
 	_, _ = writeSelfSignedCertAndKeyNamed(t, certDir2, "y.pem", "y.key", []string{"dup.example.com"})
 
-	_, err := ScanCertificates(tmpDir)
+	_, report, err := ScanCertificatesWithReport(tmpDir)
 	if err != nil {
 		t.Fatalf("did not expect error for duplicate certificates: %v", err)
+	}
+	if report.Multiple == nil {
+		t.Fatalf("expected report.Multiple to be populated")
+	}
+	if _, ok := report.Multiple["dup.example.com"]; !ok {
+		t.Fatalf("expected dup.example.com to be reported as multiple")
 	}
 }
 

@@ -4,6 +4,7 @@
         "cacheprep",
         "codepoint",
         "coverprofile",
+        "dests",
         "dylib",
         "frpc",
         "fsnotify",

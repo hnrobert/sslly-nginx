@@ -34,6 +34,7 @@ type App struct {
 	nginxManager  *nginx.Manager
 	lastGoodConf  string
 	activeCertMap map[string]ssl.Certificate
+	sslReport     ssl.ScanReport
 	backupManager *backup.Manager
 	reloadMu      sync.Mutex
 
@@ -114,7 +115,7 @@ func (a *App) Start() error {
 	}
 
 	// Print a single summary after everything is successfully applied.
-	logDomainSummary(a.config, a.activeCertMap, time.Now())
+	logDomainSummary(a.config, a.activeCertMap, a.sslReport, time.Now())
 
 	// Save the good configuration
 	a.saveGoodConfiguration()
@@ -344,10 +345,11 @@ func (a *App) reload(snapshotID string) error {
 	a.config = cfg
 
 	// Scan SSL certificates
-	certMap, err := ssl.ScanCertificates(sslDir)
+	certMap, report, err := ssl.ScanCertificatesWithReport(sslDir)
 	if err != nil {
 		return fmt.Errorf("failed to scan certificates: %w", err)
 	}
+	a.sslReport = report
 
 	// Stage runtime cert cache for configured domains.
 	if snapshotID == "" {
@@ -636,7 +638,7 @@ func (a *App) handleReload() {
 	// Save the new good configuration
 	a.saveGoodConfiguration()
 
-	logDomainSummary(a.config, a.activeCertMap, time.Now())
+	logDomainSummary(a.config, a.activeCertMap, a.sslReport, time.Now())
 	logger.Info("Configuration reloaded successfully")
 }
 

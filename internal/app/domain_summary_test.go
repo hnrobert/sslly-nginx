@@ -107,3 +107,29 @@ func TestClassifyDomains_SuccessMissingExpired(t *testing.T) {
 		t.Fatalf("expected ipv6 https destination in %v", success[1].Destinations)
 	}
 }
+
+func TestClassifyMultipleCertificates_ConfigDomainsOnlyAndSorted(t *testing.T) {
+	cfg := &config.Config{Ports: map[string][]string{
+		"1234": {"abc.de", "abc.az", "unused.example"},
+	}}
+
+	report := ssl.ScanReport{Multiple: map[string]*ssl.MultipleCertificateReport{
+		"abc.de":                {Selected: ssl.Certificate{CertPath: "/ssl/abc.de.pem", NotAfter: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)}, All: []ssl.Certificate{{CertPath: "/ssl/abc.de.pem"}, {CertPath: "/ssl/abc.de.crt"}}},
+		"abc.az":                {Selected: ssl.Certificate{CertPath: "/ssl/abc.az.pem"}, All: []ssl.Certificate{{CertPath: "/ssl/abc.az.pem"}, {CertPath: "/ssl/abc.az.crt"}, {CertPath: "/ssl/abc.az.old.pem"}}},
+		"not-in-config.example": {Selected: ssl.Certificate{CertPath: "/ssl/nope.pem"}, All: []ssl.Certificate{{CertPath: "/ssl/nope.pem"}, {CertPath: "/ssl/nope2.pem"}}},
+	}}
+
+	entries := classifyMultipleCertificates(cfg, report)
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %v", entries)
+	}
+	if entries[0].Domain != "abc.az" || entries[1].Domain != "abc.de" {
+		t.Fatalf("expected sorted domains abc.az then abc.de, got %v", entries)
+	}
+	if entries[0].Ignored != 2 {
+		t.Fatalf("expected abc.az ignored=2, got %d", entries[0].Ignored)
+	}
+	if entries[1].Ignored != 1 {
+		t.Fatalf("expected abc.de ignored=1, got %d", entries[1].Ignored)
+	}
+}
