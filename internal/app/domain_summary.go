@@ -182,9 +182,12 @@ func classifyMultipleCertificates(cfg *config.Config, report ssl.ScanReport) []m
 }
 
 // domainLess sorts by labels from TLD -> left, comparing each label by Unicode codepoint.
+// For domain/path entries, domain is compared first, then path.
 // Example ordering:
 // abc.az
 // abc.de
+// abc.de/api
+// abc.de/portainer
 // abc.abc.de
 // aad.def
 // abc.def
@@ -196,20 +199,44 @@ func domainLess(a, b string) bool {
 		return false
 	}
 
-	ap := strings.Split(a, ".")
-	bp := strings.Split(b, ".")
-
-	ai := len(ap) - 1
-	bi := len(bp) - 1
-	for ai >= 0 && bi >= 0 {
-		if ap[ai] != bp[bi] {
-			return ap[ai] < bp[bi]
-		}
-		ai--
-		bi--
+	// Split domain and path
+	aDomain, aPath := a, ""
+	if idx := strings.Index(a, "/"); idx > 0 {
+		aDomain = a[:idx]
+		aPath = a[idx:]
 	}
-	// If all shared suffix labels match, shorter domain (fewer labels) sorts first.
-	return len(ap) < len(bp)
+	bDomain, bPath := b, ""
+	if idx := strings.Index(b, "/"); idx > 0 {
+		bDomain = b[:idx]
+		bPath = b[idx:]
+	}
+
+	// Compare domains first
+	if aDomain != bDomain {
+		ap := strings.Split(aDomain, ".")
+		bp := strings.Split(bDomain, ".")
+
+		ai := len(ap) - 1
+		bi := len(bp) - 1
+		for ai >= 0 && bi >= 0 {
+			if ap[ai] != bp[bi] {
+				return ap[ai] < bp[bi]
+			}
+			ai--
+			bi--
+		}
+		// If all shared suffix labels match, shorter domain (fewer labels) sorts first.
+		return len(ap) < len(bp)
+	}
+
+	// Same domain, compare paths: no path < has path, then lexicographic
+	if aPath == "" && bPath != "" {
+		return true
+	}
+	if aPath != "" && bPath == "" {
+		return false
+	}
+	return aPath < bPath
 }
 
 func collectDomainDestinations(cfg *config.Config) map[string][]string {

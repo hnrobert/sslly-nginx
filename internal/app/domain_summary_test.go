@@ -17,10 +17,14 @@ func TestSortDomainsInPlace_TldFirstExample(t *testing.T) {
 		"aad.def",
 		"abc.abc.de",
 		"abc.de",
+		"abc.de/api",
+		"abc.de/portainer",
 	}
 	want := []string{
 		"abc.az",
 		"abc.de",
+		"abc.de/api",
+		"abc.de/portainer",
 		"abc.abc.de",
 		"aad.def",
 		"abc.def",
