@@ -36,6 +36,10 @@ type App struct {
 	activeCertMap map[string]ssl.Certificate
 	backupManager *backup.Manager
 	reloadMu      sync.Mutex
+
+	reloadDebounceMu    sync.Mutex
+	reloadDebounceTimer *time.Timer
+	reloadDebounceSeq   uint64
 }
 
 func New() (*App, error) {
@@ -185,6 +189,12 @@ func (a *App) Stop() {
 	if a.sslWatcher != nil {
 		a.sslWatcher.Stop()
 	}
+	a.reloadDebounceMu.Lock()
+	if a.reloadDebounceTimer != nil {
+		a.reloadDebounceTimer.Stop()
+		a.reloadDebounceTimer = nil
+	}
+	a.reloadDebounceMu.Unlock()
 	a.nginxManager.Stop()
 }
 
@@ -262,7 +272,7 @@ func (a *App) setupWatchers() error {
 				}
 				if event.Op&fsnotify.Write == fsnotify.Write || event.Op&fsnotify.Create == fsnotify.Create {
 					logger.Info("Config file changed: %s", event.Name)
-					a.handleReload()
+					a.scheduleReload()
 				}
 			case err, ok := <-configWatcher.Errors:
 				if !ok {
@@ -285,7 +295,7 @@ func (a *App) setupWatchers() error {
 					event.Op&fsnotify.Create == fsnotify.Create ||
 					event.Op&fsnotify.Remove == fsnotify.Remove {
 					logger.Info("SSL file changed: %s", event.Name)
-					a.handleReload()
+					a.scheduleReload()
 				}
 			case err, ok := <-sslWatcher.Errors:
 				if !ok {
@@ -302,6 +312,27 @@ func (a *App) setupWatchers() error {
 func isInternalConfigPath(p string) bool {
 	pp := filepath.ToSlash(p)
 	return strings.Contains(pp, "/.sslly-backups/") || strings.Contains(pp, "/.sslly-runtime/")
+}
+
+func (a *App) scheduleReload() {
+	const debounceWindow = 800 * time.Millisecond
+
+	a.reloadDebounceMu.Lock()
+	a.reloadDebounceSeq++
+	seq := a.reloadDebounceSeq
+	if a.reloadDebounceTimer != nil {
+		a.reloadDebounceTimer.Stop()
+	}
+	a.reloadDebounceTimer = time.AfterFunc(debounceWindow, func() {
+		a.reloadDebounceMu.Lock()
+		if seq != a.reloadDebounceSeq {
+			a.reloadDebounceMu.Unlock()
+			return
+		}
+		a.reloadDebounceMu.Unlock()
+		a.handleReload()
+	})
+	a.reloadDebounceMu.Unlock()
 }
 
 func (a *App) reload(snapshotID string) error {
