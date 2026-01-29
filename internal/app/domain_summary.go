@@ -33,10 +33,18 @@ func logDomainSummary(cfg *config.Config, activeCertMap map[string]ssl.Certifica
 		return
 	}
 
-	logger.Info("%s", formatDomainSection("Matched:", matched))
-	logger.Warn("%s", formatDomainSection("No-cert:", missing))
-	logger.Warn("%s", formatDomainSection("Expired:", expired))
-	logger.Warn("%s", formatMultipleCertSection("Multiple-certs:", multiple))
+	if len(matched) > 0 {
+		logger.Info("%s", formatDomainSection("Matched:", matched))
+	}
+	if len(missing) > 0 {
+		logger.Warn("%s", formatDomainSection("No-cert:", missing))
+	}
+	if len(expired) > 0 {
+		logger.Warn("%s", formatDomainSection("Expired:", expired))
+	}
+	if len(multiple) > 0 {
+		logger.Warn("%s", formatMultipleCertSection("Multiple-certs:", multiple))
+	}
 }
 
 func formatDomainSection(header string, entries []domainEntry) string {
