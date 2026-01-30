@@ -227,10 +227,16 @@ func GenerateConfig(cfg *config.Config, certMap map[string]ssl.Certificate) stri
 		httpsPort = p
 	}
 
+	// Determine nginx error_log level based on configuration
+	errorLogLevel := "error" // Default
+	if cfg.Log.Nginx.StderrAs != "" {
+		errorLogLevel = cfg.Log.Nginx.StderrAs
+	}
+
 	// Nginx base configuration
-	sb.WriteString(`user nginx;
+	sb.WriteString(fmt.Sprintf(`user nginx;
 worker_processes auto;
-error_log stderr warn;
+error_log stderr %s;
 pid /var/run/nginx.pid;
 
 events {
@@ -268,7 +274,7 @@ http {
     proxy_buffers 8 4k;
     proxy_busy_buffers_size 8k;
 
-`)
+`, errorLogLevel))
 
 	// Map: baseDomain -> []RouteConfig
 	domainRoutes := make(map[string][]RouteConfig)

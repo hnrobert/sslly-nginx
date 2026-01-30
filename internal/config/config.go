@@ -24,10 +24,17 @@ type LogLevelConfig struct {
 	Level string `yaml:"level"` // Log level: debug, info, warn, error (case insensitive, default: info)
 }
 
+// NginxLogConfig represents nginx-specific log configuration
+type NginxLogConfig struct {
+	Level      string `yaml:"level"`       // Display log level: debug, info, warn, error (default: info)
+	StderrAs   string `yaml:"stderr_as"`   // Nginx stderr log level: warn or error (default: error)
+	StderrShow string `yaml:"stderr_show"` // Display stderr as: warn or error (default: same as stderr_as)
+}
+
 // LogConfig represents logging configuration
 type LogConfig struct {
 	SSLLY LogLevelConfig `yaml:"sslly"` // SSLLY-NGINX component log level
-	Nginx LogLevelConfig `yaml:"nginx"` // NGINX-PROCS component log level
+	Nginx NginxLogConfig `yaml:"nginx"` // NGINX-PROCS component log configuration
 }
 
 // Upstream represents a backend server configuration

@@ -345,16 +345,30 @@ func (a *App) reload(snapshotID string) error {
 	a.config = cfg
 
 	// Apply log configuration
-	ssllLevel := "info"
+	ssllyLevel := "info"
 	if cfg.Log.SSLLY.Level != "" {
-		ssllLevel = cfg.Log.SSLLY.Level
+		ssllyLevel = cfg.Log.SSLLY.Level
 	}
 	nginxLevel := "info"
 	if cfg.Log.Nginx.Level != "" {
 		nginxLevel = cfg.Log.Nginx.Level
 	}
-	logger.SetSSLLYLevel(ssllLevel)
+
+	// Apply nginx stderr configuration
+	nginxStderrAs := "error" // Default: treat stderr as error level
+	if cfg.Log.Nginx.StderrAs != "" {
+		nginxStderrAs = cfg.Log.Nginx.StderrAs
+	}
+
+	// If stderr_show is not explicitly configured, use the same as stderr_as
+	nginxStderrShow := nginxStderrAs
+	if cfg.Log.Nginx.StderrShow != "" {
+		nginxStderrShow = cfg.Log.Nginx.StderrShow
+	}
+
+	logger.SetSSLLYLevel(ssllyLevel)
 	logger.SetNginxLevel(nginxLevel)
+	logger.SetNginxStderrLevel(nginxStderrShow)
 
 	// Scan SSL certificates
 	certMap, report, err := ssl.ScanCertificatesWithReport(sslDir)
