@@ -307,6 +307,31 @@ http {
 		}
 	}
 
+	// Generate default server blocks to handle unconfigured domains
+	sb.WriteString(`    # Default server for HTTP - reject unconfigured domains
+    server {
+        listen ` + httpPort + ` default_server;
+        server_name _;
+        return 444;
+    }
+
+    # Default server for HTTPS - reject unconfigured domains
+    server {
+        listen ` + httpsPort + ` ssl default_server;
+        server_name _;
+
+        # Use a dummy self-signed certificate
+        ssl_certificate /etc/nginx/ssl/dummy.crt;
+        ssl_certificate_key /etc/nginx/ssl/dummy.key;
+
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers HIGH:!aNULL:!MD5;
+
+        return 444;
+    }
+
+`)
+
 	// Generate HTTP → HTTPS redirect for domains with certificates
 	if len(domainsWithCerts) > 0 {
 		sb.WriteString(`    # HTTP to HTTPS redirect for domains with certificates
