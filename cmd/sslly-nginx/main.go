@@ -10,6 +10,11 @@ import (
 )
 
 func main() {
+	// Initialize file logging
+	if err := logger.InitFileLogging(); err != nil {
+		logger.Warn("Failed to initialize file logging: %v", err)
+	}
+
 	logger.Info("Starting sslly-nginx...")
 
 	application, err := app.New()

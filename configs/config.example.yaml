@@ -1,6 +1,35 @@
 # Example configuration file for sslly-nginx
 # Copy this file to config.yaml and modify according to your needs
 
+# Logging Configuration (Optional)
+# Configure log levels for different components
+log:
+  # SSLLY-NGINX component log level
+  # Options: debug, info, warn, error
+  # Default: info
+  sslly:
+    level: info
+
+  # NGINX-PROCS component log configuration
+  nginx:
+    # Display log level for nginx process logs
+    # Options: debug, info, warn, error
+    # Default: info
+    level: info
+
+    # Nginx stderr log level (what level nginx uses for stderr output)
+    # Options: warn, error
+    # Default: error
+    # This configures nginx's "error_log stderr <level>" directive
+    stderr_as: error
+
+    # Display stderr output as (how to show nginx stderr in logs)
+    # Options: warn, error
+    # Default: same as stderr_as
+    # If not specified, uses the same level as stderr_as
+    # Set to "warn" to use NginxWarn() for stderr output
+    stderr_show: error
+
 # CORS Settings (Optional)
 # Configure Cross-Origin Resource Sharing for your domains
 cors:
@@ -66,7 +95,6 @@ cors:
 1234:
   - yourdomain.com
   - www.yourdomain.com
-
 # 5678:
 #   - sub.yourdomain.com
 

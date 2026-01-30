@@ -37,10 +37,9 @@ func (m *Manager) Start() error {
 
 	cmd := exec.Command("nginx", "-g", "daemon off;")
 	// Important: by default, os/exec discards child stdout/stderr.
-	// If nginx logs to /dev/stdout|/dev/stderr (common in containers), we must
-	// wire these streams so they appear in `docker logs`.
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	// Pipe nginx logs through our logger with [NGINX-PROCS] prefix.
+	cmd.Stdout = logger.NewNginxStdoutWriter()
+	cmd.Stderr = logger.NewNginxStderrWriter()
 
 	// Start nginx in background
 	if err := cmd.Start(); err != nil {
@@ -228,24 +227,16 @@ func GenerateConfig(cfg *config.Config, certMap map[string]ssl.Certificate) stri
 		httpsPort = p
 	}
 
-	// Check if any configured domains have certificates
-	hasAnyCerts := false
-	for _, domains := range cfg.Ports {
-		for _, domain := range domains {
-			if _, ok := certMap[domain]; ok {
-				hasAnyCerts = true
-				break
-			}
-		}
-		if hasAnyCerts {
-			break
-		}
+	// Determine nginx error_log level based on configuration
+	errorLogLevel := "error" // Default
+	if cfg.Log.Nginx.StderrAs != "" {
+		errorLogLevel = cfg.Log.Nginx.StderrAs
 	}
 
 	// Nginx base configuration
-	sb.WriteString(`user nginx;
+	sb.WriteString(fmt.Sprintf(`user nginx;
 worker_processes auto;
-error_log /var/log/nginx/error.log warn;
+error_log stderr %s;
 pid /var/run/nginx.pid;
 
 events {
@@ -256,11 +247,14 @@ http {
     include /etc/nginx/mime.types;
     default_type application/octet-stream;
 
-    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
-                    '$status $body_bytes_sent "$http_referer" '
-                    '"$http_user_agent" "$http_x_forwarded_for"';
+    # Custom log format without timestamp (handled by logger)
+    # Includes upstream response details
+    log_format sslly '$remote_addr - $remote_user "$request" '
+                     '$status $body_bytes_sent "$http_referer" '
+                     '"$http_user_agent" "$http_x_forwarded_for" '
+                     'upstream: $upstream_addr $upstream_status $upstream_response_time';
 
-    access_log /var/log/nginx/access.log main;
+    access_log /dev/stdout sslly;
 
     sendfile on;
     tcp_nopush on;
@@ -280,42 +274,7 @@ http {
     proxy_buffers 8 4k;
     proxy_busy_buffers_size 8k;
 
-`)
-
-	if hasAnyCerts {
-		// If we have certificates, redirect HTTP to HTTPS
-		sb.WriteString(`    # HTTP to HTTPS redirect for all domains
-    server {
-        listen ` + httpPort + ` default_server;
-        server_name _;
-
-        location / {
-            return 301 https://$host$request_uri;
-        }
-    }
-
-`)
-	}
-
-	// Add default HTTPS server that redirects to HTTP for domains without valid certificates
-	sb.WriteString(`    # Default HTTPS server - redirect to HTTP for invalid/missing certificates
-    server {
-        listen ` + httpsPort + ` ssl default_server;
-        server_name _;
-
-        # Use a dummy self-signed certificate
-        ssl_certificate /etc/nginx/ssl/dummy.crt;
-        ssl_certificate_key /etc/nginx/ssl/dummy.key;
-
-        ssl_protocols TLSv1.2 TLSv1.3;
-        ssl_ciphers HIGH:!aNULL:!MD5;
-
-        location / {
-            return 301 http://$host$request_uri;
-        }
-    }
-
-`)
+`, errorLogLevel))
 
 	// Map: baseDomain -> []RouteConfig
 	domainRoutes := make(map[string][]RouteConfig)
@@ -336,9 +295,86 @@ http {
 		}
 	}
 
+	// Collect domains with and without certificates
+	var domainsWithCerts []string
+	var domainsWithoutCerts []string
+	for baseDomain := range domainRoutes {
+		cert, hasCert := ssl.FindCertificate(certMap, baseDomain)
+		if hasCert && cert.KeyPath != "" {
+			domainsWithCerts = append(domainsWithCerts, baseDomain)
+		} else {
+			domainsWithoutCerts = append(domainsWithoutCerts, baseDomain)
+		}
+	}
+
+	// Generate default server blocks to handle unconfigured domains
+	sb.WriteString(`    # Default server for HTTP - reject unconfigured domains
+    server {
+        listen ` + httpPort + ` default_server;
+        server_name _;
+        return 444;
+    }
+
+    # Default server for HTTPS - reject unconfigured domains
+    server {
+        listen ` + httpsPort + ` ssl default_server;
+        server_name _;
+
+        # Use a dummy self-signed certificate
+        ssl_certificate /etc/nginx/ssl/dummy.crt;
+        ssl_certificate_key /etc/nginx/ssl/dummy.key;
+
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers HIGH:!aNULL:!MD5;
+
+        return 444;
+    }
+
+`)
+
+	// Generate HTTP → HTTPS redirect for domains with certificates
+	if len(domainsWithCerts) > 0 {
+		sb.WriteString(`    # HTTP to HTTPS redirect for domains with certificates
+    server {
+        listen ` + httpPort + `;
+        server_name ` + strings.Join(domainsWithCerts, " ") + `;
+
+        location / {
+            return 301 https://$host$request_uri;
+        }
+    }
+
+`)
+	}
+
+	// Generate HTTPS → HTTP redirect for domains without certificates
+	if len(domainsWithoutCerts) > 0 {
+		sb.WriteString(`    # HTTPS to HTTP redirect for domains without certificates
+    server {
+        listen ` + httpsPort + ` ssl;
+        server_name ` + strings.Join(domainsWithoutCerts, " ") + `;
+
+        # Use a dummy self-signed certificate
+        ssl_certificate /etc/nginx/ssl/dummy.crt;
+        ssl_certificate_key /etc/nginx/ssl/dummy.key;
+
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers HIGH:!aNULL:!MD5;
+
+        location / {
+            return 301 http://$host$request_uri;
+        }
+    }
+
+`)
+	}
+
 	// Generate server blocks for each base domain
 	for baseDomain, routes := range domainRoutes {
-		cert, hasCert := certMap[baseDomain]
+		cert, hasCert := ssl.FindCertificate(certMap, baseDomain)
+		if hasCert && cert.KeyPath == "" {
+			hasCert = false
+		}
 		corsConfig := getCORSConfig(cfg, baseDomain)
 
 		if !hasCert {
@@ -364,7 +400,21 @@ http {
 					proxyPass += route.Upstream.Path
 				}
 
-				logger.Warn("No certificate found for domain: %s, serving over HTTP only (upstream: %s://%s, path: %s)", baseDomain, route.Upstream.Scheme, upstreamAddr, locationPath)
+				// For non-root paths, add redirect and use trailing slash
+				if locationPath != "/" {
+					// Add exact match redirect for path without trailing slash
+					sb.WriteString(fmt.Sprintf(`        location = %s {
+            return 301 $scheme://$host%s/;
+        }
+
+`, locationPath, locationPath))
+					// Use path with trailing slash for the actual location
+					locationPath = locationPath + "/"
+					// Add trailing slash to proxy_pass to strip the location path
+					if !strings.HasSuffix(proxyPass, "/") {
+						proxyPass += "/"
+					}
+				}
 
 				sb.WriteString(fmt.Sprintf(`        location %s {
             proxy_pass %s;
@@ -399,7 +449,6 @@ http {
 		}
 
 		// Certificate found - create HTTPS server block
-		logger.Info("Found certificate for domain: %s", baseDomain)
 		sb.WriteString(fmt.Sprintf(`    # HTTPS server block for %s
     server {
         listen %s ssl;
@@ -427,7 +476,23 @@ http {
 				proxyPass += route.Upstream.Path
 			}
 
-			logger.Info("  Route: %s -> %s://%s (path: %s)", route.DomainPath, route.Upstream.Scheme, upstreamAddr, locationPath)
+			// For non-root paths, add redirect and use trailing slash
+			if locationPath != "/" {
+				// Add exact match redirect for path without trailing slash
+				sb.WriteString(fmt.Sprintf(`        location = %s {
+            return 301 $scheme://$host%s/;
+        }
+
+`, locationPath, locationPath))
+				// Use path with trailing slash for the actual location
+				locationPath = locationPath + "/"
+				// Add trailing slash to proxy_pass to strip the location path
+				if !strings.HasSuffix(proxyPass, "/") {
+					proxyPass += "/"
+				}
+			}
+
+			// logger.Info("  Route: %s -> %s://%s (path: %s)", route.DomainPath, route.Upstream.Scheme, upstreamAddr, locationPath)
 
 			sb.WriteString(fmt.Sprintf(`        location %s {
             proxy_pass %s;

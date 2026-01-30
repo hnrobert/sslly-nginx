@@ -136,14 +136,7 @@ This generates Nginx configuration with location-based routing:
 
 ### SSL Certificate Structure
 
-Place SSL certificates in the `ssl/` directory. The application supports the following naming patterns:
-
-1. **Bundle format**: `domain_bundle.crt` and `domain_bundle.key`
-
-   - Example: `example.com_bundle.crt` and `example.com_bundle.key`
-
-2. **Standard format**: `domain.crt` and `domain.key`
-   - Example: `example.com.crt` and `example.com.key`
+Place SSL certificates in the `ssl/` directory. The application automatically matches certificate files (`.crt`) with their corresponding private key files (`.key`) based on the domain information contained within the SSL certificates.
 
 You can organize certificates in subdirectories:
 
@@ -161,11 +154,20 @@ ssl/
 
 **Important Notes**:
 
-- Each domain must have exactly one certificate (no duplicates)
-- Both `.crt` and `.key` files must exist
-- Certificates are matched by domain name automatically
+- Duplicate certificates are allowed. For each domain, only certificate+private-key pairs are considered valid; if multiple pairs match, the certificate with the farthest expiration time is selected (ties prefer `.pem` over `.crt`)
+- Certificate and key files are optional (a domain without a matched cert/key will be served over HTTP)
+- The application reads the domain information from the certificate content itself and matches it with the corresponding key file
 - **SSL certificates are optional**: If no certificate is found for a domain, the service will proxy HTTP traffic directly
 - **HTTPS to HTTP redirect**: If HTTPS is accessed for domains without valid certificates, traffic is redirected to HTTP (301)
+
+### Backup & Crash Recovery
+
+To make hot-reloads safer, `sslly-nginx` keeps a persistent on-disk snapshot of the last known-good configuration.
+
+- Backup folder: `configs/.sslly-backups/`
+- Snapshot content: `configs/` + `ssl/` + generated `/etc/nginx/nginx.conf`
+- Runtime cache: the currently used cert/key files are copied into `configs/.sslly-runtime/current/` and `nginx.conf` only references that cache, so edits under `ssl/` won't affect the running nginx process until a successful reload
+- Crash detection: if the previous run died mid-reload, the next start detects an unfinished reload and automatically restores the last known-good snapshot
 
 ### HTTP-Only Mode
 
@@ -204,12 +206,38 @@ The application watches for changes in:
 - Configuration files (`./configs/config.yaml` or `./configs/config.yml`)
 - SSL certificates (`./ssl/**/*`)
 
+Note: internal state folders under `configs/` (like `configs/.sslly-backups/` and `configs/.sslly-runtime/`) are ignored by the watcher to avoid feedback loops.
+
 When changes are detected:
 
 1. New configuration is generated
 2. Nginx configuration is tested
 3. If valid, Nginx is reloaded
-4. If invalid, the previous working configuration is restored
+4. If invalid, the previous working configuration is restored (including the on-disk `configs/` + `ssl/` contents)
+
+### Logs: Domain Summary
+
+On startup and after every successful reload, the service prints a single domain summary instead of logging domain status one-by-one.
+
+- `Matched:` (INFO) domains with a valid certificate+key and the certificate is not expired
+- `No-cert:` (WARN) domains with no matched certificate+key (served over HTTP)
+- `Expired:` (WARN) domains with a matched certificate+key, but the certificate is expired
+- `Multi-certs:` (WARN) domains where multiple certificate candidates were found; the selected certificate path is shown along with the ignored count
+
+Domains inside each block are sorted by comparing labels from TLD to left (e.g. compare `de` before `abc` in `abc.de`), and each label is compared by Unicode order. If all compared labels match, the shorter domain sorts first.
+
+Each domain line also prints its upstream destination(s) in the form `domain -> scheme://host:port[/path]`.
+
+Example order:
+
+```text
+abc.az
+abc.de
+abc.abc.de
+aad.def
+abc.def
+abc.abc.def
+```
 
 ### Error Handling
 
@@ -220,6 +248,22 @@ When changes are detected:
   - Logs detailed error messages
   - Restores the last working configuration
   - Continues running with previous settings
+
+## Testing
+
+Run unit tests:
+
+```bash
+go test ./...
+```
+
+Run tests with coverage:
+
+```bash
+go test ./... -coverprofile=coverage.out
+go tool cover -func=coverage.out
+go tool cover -html=coverage.out -o coverage.html
+```
 
 ### WebSocket Support
 

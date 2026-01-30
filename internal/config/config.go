@@ -19,6 +19,24 @@ type CORSConfig struct {
 	AllowCredentials bool     `yaml:"allow_credentials"` // Access-Control-Allow-Credentials (default: false)
 }
 
+// LogLevelConfig represents log level configuration for a component
+type LogLevelConfig struct {
+	Level string `yaml:"level"` // Log level: debug, info, warn, error (case insensitive, default: info)
+}
+
+// NginxLogConfig represents nginx-specific log configuration
+type NginxLogConfig struct {
+	Level      string `yaml:"level"`       // Display log level: debug, info, warn, error (default: info)
+	StderrAs   string `yaml:"stderr_as"`   // Nginx stderr log level: warn or error (default: error)
+	StderrShow string `yaml:"stderr_show"` // Display stderr as: warn or error (default: same as stderr_as)
+}
+
+// LogConfig represents logging configuration
+type LogConfig struct {
+	SSLLY LogLevelConfig `yaml:"sslly"` // SSLLY-NGINX component log level
+	Nginx NginxLogConfig `yaml:"nginx"` // NGINX-PROCS component log configuration
+}
+
 // Upstream represents a backend server configuration
 type Upstream struct {
 	Scheme string // Protocol scheme: "http" or "https" (default: "http")
@@ -28,6 +46,7 @@ type Upstream struct {
 }
 
 type Config struct {
+	Log   LogConfig             `yaml:"log"`
 	CORS  map[string]CORSConfig `yaml:"cors"`
 	Ports map[string][]string   `yaml:",inline"`
 }
@@ -39,6 +58,8 @@ type Config struct {
 // - "[::1]:9000" -> Upstream{Scheme: "http", Host: "::1", Port: "9000", Path: ""} (IPv6 format)
 // - "example-server.local:8080" -> Upstream{Scheme: "http", Host: "example-server.local", Port: "8080", Path: ""}
 // - "[https]192.168.50.2:1234" -> Upstream{Scheme: "https", Host: "192.168.50.2", Port: "1234", Path: ""}
+// - "[https]www.baidu.com" -> Upstream{Scheme: "https", Host: "www.baidu.com", Port: "443", Path: ""}
+// - "www.example.com" -> Upstream{Scheme: "http", Host: "www.example.com", Port: "80", Path: ""}
 func ParseUpstream(key string) Upstream {
 	// Remove trailing colon if present (for YAML keys like "192.168.31.6:1234:")
 	key = strings.TrimSuffix(key, ":")
@@ -110,13 +131,36 @@ func ParseUpstream(key string) Upstream {
 		}
 	}
 
-	// Plain port format (default to localhost)
+	// Check if it's a pure number (port only)
+	if isNumeric(key) {
+		return Upstream{
+			Scheme: scheme,
+			Host:   "127.0.0.1",
+			Port:   key,
+			Path:   path,
+		}
+	}
+
+	// Otherwise it's a hostname/domain without port - use default port
+	defaultPort := "80"
+	if scheme == "https" {
+		defaultPort = "443"
+	}
 	return Upstream{
 		Scheme: scheme,
-		Host:   "127.0.0.1",
-		Port:   key,
+		Host:   key,
+		Port:   defaultPort,
 		Path:   path,
 	}
+}
+
+func isNumeric(s string) bool {
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return len(s) > 0
 }
 
 func Load(configDir string) (*Config, error) {
