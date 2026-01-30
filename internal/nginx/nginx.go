@@ -38,9 +38,8 @@ func (m *Manager) Start() error {
 	cmd := exec.Command("nginx", "-g", "daemon off;")
 	// Important: by default, os/exec discards child stdout/stderr.
 	// Pipe nginx logs through our logger with [NGINX-PROCS] prefix.
-	nginxWriter := logger.NewNginxWriter()
-	cmd.Stdout = nginxWriter
-	cmd.Stderr = nginxWriter
+	cmd.Stdout = logger.NewNginxStdoutWriter()
+	cmd.Stderr = logger.NewNginxStderrWriter()
 
 	// Start nginx in background
 	if err := cmd.Start(); err != nil {
@@ -231,7 +230,7 @@ func GenerateConfig(cfg *config.Config, certMap map[string]ssl.Certificate) stri
 	// Nginx base configuration
 	sb.WriteString(`user nginx;
 worker_processes auto;
-error_log /var/log/nginx/error.log warn;
+error_log stderr warn;
 pid /var/run/nginx.pid;
 
 events {
@@ -242,11 +241,14 @@ http {
     include /etc/nginx/mime.types;
     default_type application/octet-stream;
 
-    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
-                    '$status $body_bytes_sent "$http_referer" '
-                    '"$http_user_agent" "$http_x_forwarded_for"';
+    # Custom log format without timestamp (handled by logger)
+    # Includes upstream response details
+    log_format sslly '$remote_addr - $remote_user "$request" '
+                     '$status $body_bytes_sent "$http_referer" '
+                     '"$http_user_agent" "$http_x_forwarded_for" '
+                     'upstream: $upstream_addr $upstream_status $upstream_response_time';
 
-    access_log /var/log/nginx/access.log main;
+    access_log /dev/stdout sslly;
 
     sendfile on;
     tcp_nopush on;

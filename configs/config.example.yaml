@@ -1,6 +1,21 @@
 # Example configuration file for sslly-nginx
 # Copy this file to config.yaml and modify according to your needs
 
+# Logging Configuration (Optional)
+# Configure log levels for different components
+log:
+  # SSLLY-NGINX component log level
+  # Options: debug, info, warn, error
+  # Default: info
+  sslly:
+    level: info
+
+  # NGINX-PROCS component log level
+  # Options: debug, info, warn, error
+  # Default: info
+  nginx:
+    level: info
+
 # CORS Settings (Optional)
 # Configure Cross-Origin Resource Sharing for your domains
 cors:
@@ -66,7 +81,6 @@ cors:
 1234:
   - yourdomain.com
   - www.yourdomain.com
-
 # 5678:
 #   - sub.yourdomain.com
 

@@ -19,6 +19,17 @@ type CORSConfig struct {
 	AllowCredentials bool     `yaml:"allow_credentials"` // Access-Control-Allow-Credentials (default: false)
 }
 
+// LogLevelConfig represents log level configuration for a component
+type LogLevelConfig struct {
+	Level string `yaml:"level"` // Log level: debug, info, warn, error (case insensitive, default: info)
+}
+
+// LogConfig represents logging configuration
+type LogConfig struct {
+	SSLLY LogLevelConfig `yaml:"sslly"` // SSLLY-NGINX component log level
+	Nginx LogLevelConfig `yaml:"nginx"` // NGINX-PROCS component log level
+}
+
 // Upstream represents a backend server configuration
 type Upstream struct {
 	Scheme string // Protocol scheme: "http" or "https" (default: "http")
@@ -28,6 +39,7 @@ type Upstream struct {
 }
 
 type Config struct {
+	Log   LogConfig             `yaml:"log"`
 	CORS  map[string]CORSConfig `yaml:"cors"`
 	Ports map[string][]string   `yaml:",inline"`
 }

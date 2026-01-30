@@ -3,6 +3,7 @@ package logger
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -22,19 +23,71 @@ const (
 	prefixNginx = "NGINX-PROCS"
 )
 
+type LogLevel int
+
+const (
+	LevelDebug LogLevel = iota
+	LevelInfo
+	LevelWarn
+	LevelError
+)
+
+var (
+	ssllMinLevel  = LevelInfo
+	nginxMinLevel = LevelInfo
+)
+
+// SetSSLLYLevel sets the minimum log level for SSLLY-NGINX logs
+func SetSSLLYLevel(level string) {
+	ssllMinLevel = parseLevel(level)
+}
+
+// SetNginxLevel sets the minimum log level for NGINX-PROCS logs
+func SetNginxLevel(level string) {
+	nginxMinLevel = parseLevel(level)
+}
+
+func parseLevel(level string) LogLevel {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "debug":
+		return LevelDebug
+	case "info":
+		return LevelInfo
+	case "warn", "warning":
+		return LevelWarn
+	case "error":
+		return LevelError
+	default:
+		return LevelInfo
+	}
+}
+
+// Debug logs a debug message
+func Debug(format string, args ...any) {
+	if ssllMinLevel <= LevelDebug {
+		log(prefixSSLLY, "DEBUG", colorWhite, format, args...)
+	}
+}
+
 // Info logs an informational message
 func Info(format string, args ...any) {
-	log(prefixSSLLY, "INFO", colorCyan, format, args...)
+	if ssllMinLevel <= LevelInfo {
+		log(prefixSSLLY, "INFO", colorCyan, format, args...)
+	}
 }
 
 // Warn logs a warning message
 func Warn(format string, args ...any) {
-	log(prefixSSLLY, "WARN", colorYellow, format, args...)
+	if ssllMinLevel <= LevelWarn {
+		log(prefixSSLLY, "WARN", colorYellow, format, args...)
+	}
 }
 
 // Error logs an error message
 func Error(format string, args ...any) {
-	log(prefixSSLLY, "ERROR", colorRed, format, args...)
+	if ssllMinLevel <= LevelError {
+		log(prefixSSLLY, "ERROR", colorRed, format, args...)
+	}
 }
 
 // Fatal logs an error message and exits
@@ -45,7 +98,16 @@ func Fatal(format string, args ...any) {
 
 // NginxInfo logs nginx process output as info
 func NginxInfo(format string, args ...any) {
-	log(prefixNginx, "INFO", colorCyan, format, args...)
+	if nginxMinLevel <= LevelInfo {
+		log(prefixNginx, "INFO", colorCyan, format, args...)
+	}
+}
+
+// NginxError logs nginx process stderr as error
+func NginxError(format string, args ...any) {
+	if nginxMinLevel <= LevelError {
+		log(prefixNginx, "ERROR", colorRed, format, args...)
+	}
 }
 
 // log formats and prints a log message with colours
@@ -67,7 +129,9 @@ func log(prefix, level, levelColor, format string, args ...any) {
 }
 
 // NginxWriter wraps nginx stdout/stderr to log through our logger
-type NginxWriter struct{}
+type NginxWriter struct {
+	isStderr bool
+}
 
 // Write implements io.Writer interface
 func (w *NginxWriter) Write(p []byte) (n int, err error) {
@@ -78,13 +142,22 @@ func (w *NginxWriter) Write(p []byte) (n int, err error) {
 			msg = msg[:len(msg)-1]
 		}
 		if msg != "" {
-			NginxInfo("%s", msg)
+			if w.isStderr {
+				NginxError("%s", msg)
+			} else {
+				NginxInfo("%s", msg)
+			}
 		}
 	}
 	return len(p), nil
 }
 
-// NewNginxWriter creates a new NginxWriter
-func NewNginxWriter() *NginxWriter {
-	return &NginxWriter{}
+// NewNginxStdoutWriter creates a new NginxWriter for stdout
+func NewNginxStdoutWriter() *NginxWriter {
+	return &NginxWriter{isStderr: false}
+}
+
+// NewNginxStderrWriter creates a new NginxWriter for stderr
+func NewNginxStderrWriter() *NginxWriter {
+	return &NginxWriter{isStderr: true}
 }

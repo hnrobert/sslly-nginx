@@ -344,6 +344,18 @@ func (a *App) reload(snapshotID string) error {
 	}
 	a.config = cfg
 
+	// Apply log configuration
+	ssllLevel := "info"
+	if cfg.Log.SSLLY.Level != "" {
+		ssllLevel = cfg.Log.SSLLY.Level
+	}
+	nginxLevel := "info"
+	if cfg.Log.Nginx.Level != "" {
+		nginxLevel = cfg.Log.Nginx.Level
+	}
+	logger.SetSSLLYLevel(ssllLevel)
+	logger.SetNginxLevel(nginxLevel)
+
 	// Scan SSL certificates
 	certMap, report, err := ssl.ScanCertificatesWithReport(sslDir)
 	if err != nil {
