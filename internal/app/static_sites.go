@@ -102,12 +102,6 @@ func (a *App) prepareStaticSitesForReload(cfg *config.Config) (*config.Config, f
 	for _, s := range keep {
 		reservedPorts[s.Port] = struct{}{}
 	}
-	for _, want := range desiredSites {
-		if want.hasPort {
-			reservedPorts[want.port] = struct{}{}
-		}
-	}
-
 	// Avoid auto-allocating ports that already exist as numeric upstream keys.
 	for k := range cfg.Ports {
 		// Only care about raw numeric keys like "1234".
