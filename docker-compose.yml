@@ -9,6 +9,7 @@ services:
       - ./configs:/app/configs
       - ./ssl:/app/ssl
       - ./logs:/app/logs
+      - ./static:/app/static
     environment:
       - TZ=Asia/Shanghai
       - LANG=zh_CN.UTF-8

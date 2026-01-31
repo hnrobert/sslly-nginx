@@ -29,6 +29,7 @@ type App struct {
 	activeCertMap map[string]ssl.Certificate
 	sslReport     ssl.ScanReport
 	backupManager *backup.Manager
+	staticSites   map[string]*runningStaticSite
 	reloadMu      sync.Mutex
 
 	reloadDebounceMu    sync.Mutex
@@ -39,6 +40,7 @@ type App struct {
 func New() (*App, error) {
 	return &App{
 		nginxManager: nginx.NewManager(),
+		staticSites:  make(map[string]*runningStaticSite),
 	}, nil
 }
 
@@ -58,6 +60,9 @@ func (a *App) Start() error {
 	}
 	if err := ensureDirWritable("/app/ssl"); err != nil {
 		logger.Warn("failed to ensure /app/ssl is writable: %v", err)
+	}
+	if err := ensureDirWritable("/app/static"); err != nil {
+		logger.Warn("failed to ensure /app/static is writable: %v", err)
 	}
 
 	// Migrate legacy config.yaml/config.yml BEFORE creating proxy.yaml,
@@ -131,6 +136,7 @@ func (a *App) Stop() {
 	if a.sslWatcher != nil {
 		a.sslWatcher.Stop()
 	}
+	a.stopAllStaticSites()
 	a.reloadDebounceMu.Lock()
 	if a.reloadDebounceTimer != nil {
 		a.reloadDebounceTimer.Stop()

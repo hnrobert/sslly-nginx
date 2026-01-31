@@ -17,7 +17,18 @@ func (a *App) reload(snapshotID string) error {
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
-	a.config = cfg
+
+	// Static sites: turn directory entries in proxy.yaml into localhost ports
+	// by starting an internal file server per mapping (or reusing existing ones).
+	effectiveCfg, finalizeStatic, err := a.prepareStaticSitesForReload(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to prepare static sites: %w", err)
+	}
+	// Default: if anything below fails, stop newly-started static servers.
+	success := false
+	defer func() { finalizeStatic(success) }()
+
+	a.config = effectiveCfg
 
 	// Apply log configuration
 	ssllyLevel := "info"
@@ -65,7 +76,7 @@ func (a *App) reload(snapshotID string) error {
 	a.activeCertMap = activeCertMap
 
 	// Generate nginx configuration
-	nginxConfig := nginx.GenerateConfig(cfg, activeCertMap)
+	nginxConfig := nginx.GenerateConfig(effectiveCfg, activeCertMap)
 
 	// Store generated nginx.conf into runtime cache as well.
 	if err := writeRuntimeNginxConf(snapshotID, nginxConfig); err != nil {
@@ -82,6 +93,7 @@ func (a *App) reload(snapshotID string) error {
 	}
 
 	logger.Info("Nginx configuration generated successfully")
+	success = true
 	return nil
 }
 

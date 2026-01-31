@@ -8,6 +8,8 @@
 # 3. hostname:port: [domains]     - Proxies to specified hostname:port via HTTP
 # 4. [ipv6]:port: [domains]       - Proxies to IPv6 address with brackets via HTTP
 # 5. [https]upstream: [domains]   - Proxies to upstream via HTTPS (prevents "plain HTTP to HTTPS port" errors)
+# 6. ./dir or /abs/dir: [domains] - Serves a local directory as a static site (auto-assigns an available port from 10000)
+# 7. ./dir:port: [domains]        - Serves a local directory as a static site on a fixed local port
 
 # Example 1: Proxy to localhost (default)
 1234:
@@ -39,3 +41,18 @@
 #
 # 192.168.50.2:3456/api:
 #   - shared.example.com/api
+
+# Example 7: Static site from a directory (auto port)
+# Notes:
+# - If the key starts with '.' or '/', sslly-nginx treats it as a directory path.
+# - If you don't specify a port, sslly-nginx will pick an available one starting from 10000.
+# - Default docker-compose mounts ./static -> /app/static
+#
+# /app/static:
+#   - static.example.com
+
+# Example 8: Static site from a directory (fixed port)
+# If the port is already in use, sslly-nginx will log an error for this entry and continue loading others.
+#
+# ./static:10080:
+#   - docs.example.com
