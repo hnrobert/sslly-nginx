@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -455,6 +456,77 @@ cors:
 	}
 	if _, ok := corsRoot["*"]; !ok {
 		t.Fatalf("cors.yaml should contain wildcard config")
+	}
+}
+
+func TestPrepare_LegacyUser_PreservesComments(t *testing.T) {
+	t.Setenv("SSLLY_EXAMPLE_DIR", t.TempDir())
+
+	tmpDir := t.TempDir()
+
+	legacy := `# global header comment
+log: # log key inline comment
+  # sslly comment
+  sslly:
+    level: debug # sslly level inline
+  nginx:
+    level: warn
+
+# cors section header
+cors:
+  "*":
+    allow_origin: "*" # cors inline
+
+# port section header
+1234: # port inline
+  - a.com # domain inline
+`
+	writeFile(t, filepath.Join(tmpDir, legacyConfigYAML), legacy)
+
+	if err := Prepare(tmpDir); err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+
+	proxyBytes, err := os.ReadFile(filepath.Join(tmpDir, proxyConfigFile))
+	if err != nil {
+		t.Fatalf("read proxy: %v", err)
+	}
+	logsBytes, err := os.ReadFile(filepath.Join(tmpDir, logsConfigFile))
+	if err != nil {
+		t.Fatalf("read logs: %v", err)
+	}
+	corsBytes, err := os.ReadFile(filepath.Join(tmpDir, corsConfigFile))
+	if err != nil {
+		t.Fatalf("read cors: %v", err)
+	}
+
+	proxyText := string(proxyBytes)
+	logsText := string(logsBytes)
+	corsText := string(corsBytes)
+
+	// Ensure we didn't lose comments while splitting.
+	if !strings.Contains(proxyText, "global header comment") &&
+		!strings.Contains(logsText, "global header comment") &&
+		!strings.Contains(corsText, "global header comment") {
+		t.Fatalf("expected global header comment to be preserved in at least one split file")
+	}
+	if !strings.Contains(logsText, "log key inline comment") {
+		t.Fatalf("expected log key inline comment to be preserved in logs.yaml, got:\n%s", logsText)
+	}
+	if !strings.Contains(logsText, "sslly level inline") {
+		t.Fatalf("expected sslly inline comment to be preserved in logs.yaml, got:\n%s", logsText)
+	}
+	if !strings.Contains(corsText, "cors section header") {
+		t.Fatalf("expected cors section header comment to be preserved in cors.yaml, got:\n%s", corsText)
+	}
+	if !strings.Contains(corsText, "cors inline") {
+		t.Fatalf("expected cors inline comment to be preserved in cors.yaml, got:\n%s", corsText)
+	}
+	if !strings.Contains(proxyText, "port section header") {
+		t.Fatalf("expected port section header comment to be preserved in proxy.yaml, got:\n%s", proxyText)
+	}
+	if !strings.Contains(proxyText, "domain inline") {
+		t.Fatalf("expected domain inline comment to be preserved in proxy.yaml, got:\n%s", proxyText)
 	}
 }
 

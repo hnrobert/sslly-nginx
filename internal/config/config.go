@@ -271,31 +271,29 @@ func migrateLegacyConfigIfPresent(configDir string) error {
 			return fmt.Errorf("failed to read legacy config %s: %w", filepath.Base(legacyPath), err)
 		}
 
-		var root map[any]any
-		if err := yaml.Unmarshal(data, &root); err != nil {
+		var doc yaml.Node
+		if err := yaml.Unmarshal(data, &doc); err != nil {
 			return fmt.Errorf("failed to parse legacy config %s: %w", filepath.Base(legacyPath), err)
 		}
 
-		// Extract cors/log blocks (if any)
-		if corsVal, ok := root["cors"]; ok {
-			if !fileExists(corsPath) {
-				if err := writeYAMLFile(corsPath, corsVal); err != nil {
-					return err
-				}
-			}
-			delete(root, "cors")
-		}
-		if logVal, ok := root["log"]; ok {
-			if !fileExists(logsPath) {
-				if err := writeYAMLFile(logsPath, logVal); err != nil {
-					return err
-				}
-			}
-			delete(root, "log")
+		proxyDoc, corsDoc, logsDoc, err := splitLegacyDocPreserveComments(&doc)
+		if err != nil {
+			return err
 		}
 
+		// Extract cors/log blocks (if any). These files contain the inner object, without outer 'cors:'/'log:'.
+		if corsDoc != nil && !fileExists(corsPath) {
+			if err := writeYAMLNodeFile(corsPath, corsDoc); err != nil {
+				return err
+			}
+		}
+		if logsDoc != nil && !fileExists(logsPath) {
+			if err := writeYAMLNodeFile(logsPath, logsDoc); err != nil {
+				return err
+			}
+		}
 		if !fileExists(proxyPath) {
-			if err := writeYAMLFile(proxyPath, root); err != nil {
+			if err := writeYAMLNodeFile(proxyPath, proxyDoc); err != nil {
 				return err
 			}
 		}
@@ -317,6 +315,128 @@ func migrateLegacyConfigIfPresent(configDir string) error {
 	}
 	if err := os.Rename(legacyPath, backupPath); err != nil {
 		return fmt.Errorf("failed to rename legacy config to %s: %w", backupName, err)
+	}
+	return nil
+}
+
+func splitLegacyDocPreserveComments(doc *yaml.Node) (proxyDoc, corsDoc, logsDoc *yaml.Node, err error) {
+	if doc == nil || doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
+		return nil, nil, nil, fmt.Errorf("invalid legacy config: expected a YAML document")
+	}
+	root := doc.Content[0]
+	if root.Kind != yaml.MappingNode {
+		return nil, nil, nil, fmt.Errorf("invalid legacy config: expected a mapping at the document root")
+	}
+
+	proxyDoc = deepCopyYAMLNode(doc)
+	proxyRoot := proxyDoc.Content[0]
+
+	var corsKey, corsVal, logKey, logVal *yaml.Node
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		k := root.Content[i]
+		v := root.Content[i+1]
+		if k.Kind != yaml.ScalarNode {
+			continue
+		}
+		switch k.Value {
+		case "cors":
+			corsKey = deepCopyYAMLNode(k)
+			corsVal = deepCopyYAMLNode(v)
+		case "log":
+			logKey = deepCopyYAMLNode(k)
+			logVal = deepCopyYAMLNode(v)
+		}
+	}
+
+	// Remove extracted keys from proxy output.
+	filtered := proxyRoot.Content[:0]
+	for i := 0; i+1 < len(proxyRoot.Content); i += 2 {
+		k := proxyRoot.Content[i]
+		if k.Kind == yaml.ScalarNode && (k.Value == "cors" || k.Value == "log") {
+			continue
+		}
+		filtered = append(filtered, k, proxyRoot.Content[i+1])
+	}
+	proxyRoot.Content = filtered
+
+	if corsVal != nil {
+		mergeDroppedKeyComments(corsKey, corsVal)
+		corsDoc = &yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{corsVal}}
+	}
+	if logVal != nil {
+		mergeDroppedKeyComments(logKey, logVal)
+		logsDoc = &yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{logVal}}
+	}
+
+	return proxyDoc, corsDoc, logsDoc, nil
+}
+
+func deepCopyYAMLNode(n *yaml.Node) *yaml.Node {
+	if n == nil {
+		return nil
+	}
+	cpy := *n
+	if n.Alias != nil {
+		cpy.Alias = deepCopyYAMLNode(n.Alias)
+	}
+	if len(n.Content) > 0 {
+		cpy.Content = make([]*yaml.Node, 0, len(n.Content))
+		for _, c := range n.Content {
+			cpy.Content = append(cpy.Content, deepCopyYAMLNode(c))
+		}
+	}
+	return &cpy
+}
+
+func mergeDroppedKeyComments(key, val *yaml.Node) {
+	if key == nil || val == nil {
+		return
+	}
+
+	// Comments that were attached to the removed key should still be preserved.
+	if key.HeadComment != "" {
+		val.HeadComment = joinComments(key.HeadComment, val.HeadComment)
+	}
+	if key.LineComment != "" {
+		// Inline comment on the dropped key can't remain inline; preserve it as a head comment.
+		val.HeadComment = joinComments(key.LineComment, val.HeadComment)
+	}
+	if key.FootComment != "" {
+		val.FootComment = joinComments(val.FootComment, key.FootComment)
+	}
+}
+
+func joinComments(a, b string) string {
+	if a == "" {
+		return b
+	}
+	if b == "" {
+		return a
+	}
+	return a + "\n" + b
+}
+
+func writeYAMLNodeFile(path string, doc *yaml.Node) error {
+	if doc == nil {
+		return fmt.Errorf("failed to write %s: nil yaml document", filepath.Base(path))
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("failed to create config dir for %s: %w", filepath.Base(path), err)
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0666)
+	if err != nil {
+		return fmt.Errorf("failed to write %s: %w", filepath.Base(path), err)
+	}
+	defer file.Close()
+
+	enc := yaml.NewEncoder(file)
+	enc.SetIndent(2)
+	if err := enc.Encode(doc); err != nil {
+		_ = enc.Close()
+		return fmt.Errorf("failed to encode yaml for %s: %w", filepath.Base(path), err)
+	}
+	if err := enc.Close(); err != nil {
+		return fmt.Errorf("failed to finalize yaml for %s: %w", filepath.Base(path), err)
 	}
 	return nil
 }
@@ -350,7 +470,7 @@ func ensureFileFromExample(configDir, filename, exampleFilename string) error {
 		return fmt.Errorf("missing required %s and no example found at %s", proxyConfigFile, examplePath)
 	}
 
-	// Optional files: keep behavior of ensuring they exist.
+	// Optional files: keep behaviour of ensuring they exist.
 	return os.WriteFile(dst, []byte{}, 0666)
 }
 
