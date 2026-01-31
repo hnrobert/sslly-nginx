@@ -1,0 +1,45 @@
+# Example CORS configuration for sslly-nginx
+# Copy this file to cors.yaml if you want to enable/configure CORS
+
+# Wildcard applies to all domains (you can also specify individual domains)
+"*":
+  # Origin to allow (use "*" for all origins, or specific origin like "https://example.com")
+  allow_origin: "*"
+
+  # HTTP methods allowed for CORS requests
+  # Default (if not specified): All methods (GET, HEAD, POST, PUT, DELETE, CONNECT, OPTIONS, TRACE, PATCH)
+  allow_methods:
+    - GET
+    - HEAD
+    - POST
+    - PUT
+    - DELETE
+    - CONNECT
+    - OPTIONS
+    - TRACE
+    - PATCH
+
+  # Headers that can be used in the actual request
+  allow_headers:
+    - DNT
+    - User-Agent
+    - X-Requested-With
+    - If-Modified-Since
+    - Cache-Control
+    - Content-Type
+    - Range
+    - Authorization
+
+  # Headers exposed to the browser
+  expose_headers:
+    - Content-Length
+    - Content-Range
+
+  # How long (in seconds) the preflight response can be cached
+  # Default: 1728000 (20 days)
+  max_age: 1728000
+
+  # Whether to allow credentials (cookies, authorization headers, etc.)
+  # Default: false
+  # Note: If true, allow_origin cannot be "*"
+  allow_credentials: false

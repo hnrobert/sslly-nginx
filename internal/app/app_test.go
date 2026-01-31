@@ -10,7 +10,7 @@ func TestEnsureConfigFile_CopyAndPermissions(t *testing.T) {
 	tmpDir := t.TempDir()
 	defaultFile := filepath.Join(tmpDir, "default.yaml")
 	destinationDir := filepath.Join(tmpDir, "dest")
-	destinationFile := filepath.Join(destinationDir, "config.yaml")
+	destinationFile := filepath.Join(destinationDir, "proxy.yaml")
 
 	// Create default file
 	if err := os.WriteFile(defaultFile, []byte("foo: bar\n"), 0644); err != nil {

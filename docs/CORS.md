@@ -2,52 +2,51 @@
 
 ## Overview
 
-sslly-nginx now supports comprehensive CORS (Cross-Origin Resource Sharing) configuration through the `config.yaml` file. You can customize all CORS headers and behaviors for your domains.
+sslly-nginx supports comprehensive CORS (Cross-Origin Resource Sharing) configuration through the `cors.yaml` file. You can customize all CORS headers and behaviors for your domains.
 
 ## Configuration Options
 
 ### Complete CORS Configuration Example
 
 ```yaml
-cors:
-  '*': # Wildcard applies to all domains
-    # Origin to allow (use "*" for all origins, or specific origin like "https://example.com")
-    allow_origin: '*'
+'*': # Wildcard applies to all domains
+  # Origin to allow (use "*" for all origins, or specific origin like "https://example.com")
+  allow_origin: '*'
 
-    # HTTP methods allowed for CORS requests
-    # Default (if not specified): All methods (GET, HEAD, POST, PUT, DELETE, CONNECT, OPTIONS, TRACE, PATCH)
-    allow_methods:
-      - GET
-      - HEAD
-      - POST
-      - PUT
-      - DELETE
-      - CONNECT
-      - OPTIONS
-      - TRACE
-      - PATCH
+  # HTTP methods allowed for CORS requests
+  # Default (if not specified): All methods (GET, HEAD, POST, PUT, DELETE, CONNECT, OPTIONS, TRACE, PATCH)
+  allow_methods:
+    - GET
+    - HEAD
+    - POST
+    - PUT
+    - DELETE
+    - CONNECT
+    - OPTIONS
+    - TRACE
+    - PATCH
 
-    # Headers that can be used in the actual request
-    allow_headers:
-      - DNT
-      - User-Agent
-      - X-Requested-With
-      - If-Modified-Since
-      - Cache-Control
-      - Content-Type
-      - Range
-      - Authorization
+  # Headers that can be used in the actual request
+  allow_headers:
+    - DNT
+    - User-Agent
+    - X-Requested-With
+    - If-Modified-Since
+    - Cache-Control
+    - Content-Type
+    - Range
+    - Authorization
 
-    # Headers exposed to the browser
-    expose_headers:
-      - Content-Length
-      - Content-Range
+  # Headers exposed to the browser
+  expose_headers:
+    - Content-Length
+    - Content-Range
 
-    # How long (in seconds) the preflight response can be cached
-    max_age: 1728000 # 20 days
+  # How long (in seconds) the preflight response can be cached
+  max_age: 1728000 # 20 days
 
-    # Whether to allow credentials (cookies, authorization headers, etc.)
-    allow_credentials: false
+  # Whether to allow credentials (cookies, authorization headers, etc.)
+  allow_credentials: false
 ```
 
 ### Configuration Fields
@@ -66,26 +65,25 @@ cors:
 You can also configure CORS for specific domains:
 
 ```yaml
-cors:
-  # Global default for all domains
-  '*':
-    allow_origin: '*'
-    allow_methods: [GET, POST, OPTIONS]
+# Global default for all domains
+'*':
+  allow_origin: '*'
+  allow_methods: [GET, POST, OPTIONS]
 
-  # Specific configuration for api.example.com
-  'api.example.com':
-    allow_origin: 'https://app.example.com'
-    allow_methods: [GET, POST, PUT, DELETE, OPTIONS]
-    allow_headers: [Content-Type, Authorization]
-    allow_credentials: true
-    max_age: 86400 # 1 day
+# Specific configuration for api.example.com
+'api.example.com':
+  allow_origin: 'https://app.example.com'
+  allow_methods: [GET, POST, PUT, DELETE, OPTIONS]
+  allow_headers: [Content-Type, Authorization]
+  allow_credentials: true
+  max_age: 86400 # 1 day
 ```
 
 ## Generated Nginx Configuration
 
 The CORS configuration generates appropriate Nginx headers. Example output:
 
-```nginx
+```conf
 # CORS configuration
 add_header 'Access-Control-Allow-Origin' '*' always;
 add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, DELETE' always;
@@ -93,6 +91,7 @@ add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Mo
 add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;
 
 # Handle OPTIONS preflight requests
+
 if ($request_method = 'OPTIONS') {
     add_header 'Access-Control-Allow-Origin' '*' always;
     add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, DELETE' always;
@@ -102,6 +101,7 @@ if ($request_method = 'OPTIONS') {
     add_header 'Content-Length' 0;
     return 204;
 }
+
 ```
 
 ## Important Notes
@@ -111,10 +111,9 @@ if ($request_method = 'OPTIONS') {
 When `allow_credentials: true`, you **cannot** use `allow_origin: "*"`. You must specify an exact origin:
 
 ```yaml
-cors:
-  'api.example.com':
-    allow_origin: 'https://app.example.com' # Must be specific
-    allow_credentials: true
+'api.example.com':
+  allow_origin: 'https://app.example.com' # Must be specific
+  allow_credentials: true
 ```
 
 ### Default Behaviour
@@ -139,12 +138,13 @@ If you omit the CORS configuration, sslly-nginx will use sensible defaults:
 ### Basic API with CORS
 
 ```yaml
-cors:
-  '*':
-    allow_origin: '*'
-    allow_methods: [GET, POST, PUT, DELETE, OPTIONS]
-    allow_headers: [Content-Type, Authorization]
+# cors.yaml
+'*':
+  allow_origin: '*'
+  allow_methods: [GET, POST, PUT, DELETE, OPTIONS]
+  allow_headers: [Content-Type, Authorization]
 
+# proxy.yaml
 1234:
   - api.example.com
 ```
@@ -152,14 +152,15 @@ cors:
 ### Secure API with Credentials
 
 ```yaml
-cors:
-  'api.example.com':
-    allow_origin: 'https://app.example.com'
-    allow_methods: [GET, POST, OPTIONS]
-    allow_headers: [Content-Type, Authorization, X-CSRF-Token]
-    allow_credentials: true
-    max_age: 86400
+# cors.yaml
+'api.example.com':
+  allow_origin: 'https://app.example.com'
+  allow_methods: [GET, POST, OPTIONS]
+  allow_headers: [Content-Type, Authorization, X-CSRF-Token]
+  allow_credentials: true
+  max_age: 86400
 
+# proxy.yaml
 5678:
   - api.example.com
 ```
@@ -167,16 +168,17 @@ cors:
 ### Multiple Domains with Different CORS
 
 ```yaml
-cors:
-  'public-api.example.com':
-    allow_origin: '*'
-    allow_methods: [GET, OPTIONS]
+# cors.yaml
+'public-api.example.com':
+  allow_origin: '*'
+  allow_methods: [GET, OPTIONS]
+ 
+'private-api.example.com':
+  allow_origin: 'https://admin.example.com'
+  allow_methods: [GET, POST, PUT, DELETE, OPTIONS]
+  allow_credentials: true
 
-  'private-api.example.com':
-    allow_origin: 'https://admin.example.com'
-    allow_methods: [GET, POST, PUT, DELETE, OPTIONS]
-    allow_credentials: true
-
+# proxy.yaml
 8080:
   - public-api.example.com
 

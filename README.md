@@ -18,7 +18,7 @@ A smart Nginx SSL reverse proxy manager that automatically configures SSL certif
 
 `sslly-nginx` is a Go application that runs inside an Nginx Alpine container and manages the Nginx configuration dynamically:
 
-1. **Configuration Monitoring**: Watches `./configs/config.yaml` for changes
+1. **Configuration Monitoring**: Watches `./configs/*.yaml` for changes
 2. **Certificate Scanning**: Recursively scans `./ssl` directory for certificate files
 3. **Nginx Generation**: Generates Nginx configuration based on port-to-domain mappings
 4. **Health Checks**: Verifies Nginx health after each reload
@@ -38,7 +38,7 @@ For a quick start & deployment guide, see [docs/QUICKSTART.md](docs/QUICKSTART.m
 
 ### Application Configuration
 
-The configuration file (`configs/config.yaml`) maps upstream addresses to domain names. It supports multiple formats and advanced features.
+The proxy configuration file (`configs/proxy.yaml`) maps upstream addresses to domain names. Optional features live in `configs/cors.yaml` and `configs/logs.yaml`.
 
 #### CORS Configuration (Optional)
 
@@ -46,12 +46,11 @@ Configure CORS (Cross-Origin Resource Sharing) settings globally or per-domain.
 
 ```yaml
 # You can also configure CORS for specific domains:
-cors:
-  'api.example.com':
-    allow_origin: 'https://app.example.com'
-    allow_methods: [GET, POST, PUT, DELETE, OPTIONS]
-    allow_headers: [Content-Type, Authorization]
-    allow_credentials: true
+'api.example.com':
+  allow_origin: 'https://app.example.com'
+  allow_methods: [GET, POST, PUT, DELETE, OPTIONS]
+  allow_headers: [Content-Type, Authorization]
+  allow_credentials: true
 ```
 
 For more please check [CORS Configuration](docs/CORS.md) for comprehensive CORS setup guide and best practices examples
@@ -182,7 +181,7 @@ If you don't have SSL certificates yet or want to serve some domains over HTTP o
 Example scenario:
 
 ```yaml
-# config.yaml
+# proxy.yaml
 1234:
   - secure.example.com # Has certificate → HTTPS
   - dev.example.com # No certificate → HTTP only
@@ -203,7 +202,7 @@ If no certificates are found for any domain, HTTP traffic is proxied directly to
 
 The application watches for changes in:
 
-- Configuration files (`./configs/config.yaml` or `./configs/config.yml`)
+- Configuration files (`./configs/proxy.yaml`, and optional `./configs/cors.yaml` / `./configs/logs.yaml`)
 - SSL certificates (`./ssl/**/*`)
 
 Note: internal state folders under `configs/` (like `configs/.sslly-backups/` and `configs/.sslly-runtime/`) are ignored by the watcher to avoid feedback loops.
@@ -475,7 +474,12 @@ sslly-nginx/
 │       ├── docker-build.yml     # Docker build pipeline
 │       └── release.yml          # Release pipeline
 ├── configs/
-│   └── config.example.yaml      # Example configuration
+│   ├── proxy.yaml               # Proxy mappings (required)
+│   ├── cors.yaml                # Optional CORS settings
+│   ├── logs.yaml                # Optional log settings
+│   ├── proxy.example.yaml       # Example proxy mappings
+│   ├── cors.example.yaml        # Example CORS settings
+│   └── logs.example.yaml        # Example log settings
 ├── ssl/
 │   └── README.md                # SSL certificate guide
 ├── Dockerfile                   # Docker image definition
@@ -509,7 +513,7 @@ docker-compose logs -f
 **Solution**:
 
 1. Check logs: `docker-compose logs`
-2. Verify `configs/config.yaml` exists and is valid YAML
+2. Verify `configs/proxy.yaml` exists and is valid YAML
 3. Ensure all domains have matching certificates in `ssl/`
 
 ### Certificate Not Found

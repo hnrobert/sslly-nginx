@@ -1,0 +1,23 @@
+# Example logging configuration for sslly-nginx
+# Copy this file to logs.yaml if you want to customize log behavior
+
+# SSLLY-NGINX component log level
+# Options: debug, info, warn, error
+sslly:
+  level: info
+
+# NGINX-PROCS component log configuration
+nginx:
+  # Display log level for nginx process logs
+  # Options: debug, info, warn, error
+  level: info
+
+  # Nginx stderr log level (what level nginx uses for stderr output)
+  # Options: warn, error
+  # This configures nginx's "error_log stderr <level>" directive
+  stderr_as: error
+
+  # Display stderr output as (how to show nginx stderr in logs)
+  # Options: warn, error
+  # If not specified, uses the same level as stderr_as
+  stderr_show: error

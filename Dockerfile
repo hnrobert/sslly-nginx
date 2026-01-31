@@ -27,8 +27,10 @@ RUN mkdir -p /app/configs /app/ssl /etc/nginx/ssl /etc/sslly/configs /var/run \
     && chown -R 1000:1000 /app /app/configs /app/ssl || true \
     && chmod -R g+rwX,u+rwX,o+rX /app /etc/nginx /etc/sslly/configs /var/run || true
 
-# Copy default configuration
-COPY configs/config.example.yaml /etc/sslly/configs/config.yaml
+## Copy default configuration examples (used to auto-fill missing configs on first boot)
+COPY configs/proxy.example.yaml /etc/sslly/configs/proxy.example.yaml
+COPY configs/cors.example.yaml /etc/sslly/configs/cors.example.yaml
+COPY configs/logs.example.yaml /etc/sslly/configs/logs.example.yaml
 
 # Generate a dummy self-signed certificate for default HTTPS server
 RUN openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
@@ -41,8 +43,8 @@ RUN openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
 RUN ln -sf /dev/stdout /var/log/nginx/access.log \
     && ln -sf /dev/stderr /var/log/nginx/error.log
 
-# Ensure default config is world-readable and writable by owner
-RUN chmod 0644 /etc/sslly/configs/config.yaml || true
+# Ensure default configs are world-readable
+RUN chmod 0644 /etc/sslly/configs/*.yaml || true
 
 # Create non-root runtime user (UID/GID 1000) to match common host user
 # and ensure directories are accessible when container runs as that user
