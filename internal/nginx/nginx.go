@@ -32,8 +32,15 @@ func NewManager() *Manager {
 func (m *Manager) Start() error {
 	logger.Info("Starting nginx...")
 
-	// Remove stale PID file if it exists
-	os.Remove("/var/run/nginx.pid")
+	// Remove stale PID file if it exists (we use /tmp for non-root compatibility)
+	_ = os.Remove("/tmp/nginx.pid")
+
+	// Ensure nginx temp directories are writable in non-root containers.
+	_ = os.MkdirAll("/tmp/nginx/client_body", 0777)
+	_ = os.MkdirAll("/tmp/nginx/proxy", 0777)
+	_ = os.MkdirAll("/tmp/nginx/fastcgi", 0777)
+	_ = os.MkdirAll("/tmp/nginx/uwsgi", 0777)
+	_ = os.MkdirAll("/tmp/nginx/scgi", 0777)
 
 	cmd := exec.Command("nginx", "-g", "daemon off;")
 	// Important: by default, os/exec discards child stdout/stderr.
@@ -48,16 +55,8 @@ func (m *Manager) Start() error {
 
 	m.cmd = cmd
 
-	// Wait a moment for nginx to start and write PID file
+	// Wait a moment for nginx to start.
 	time.Sleep(2 * time.Second)
-
-	// Write PID file manually since daemon off doesn't do it properly
-	if m.cmd.Process != nil {
-		pidStr := fmt.Sprintf("%d\n", m.cmd.Process.Pid)
-		if err := os.WriteFile("/var/run/nginx.pid", []byte(pidStr), 0644); err != nil {
-			logger.Warn("Failed to write PID file: %v", err)
-		}
-	}
 
 	return nil
 }
@@ -234,10 +233,11 @@ func GenerateConfig(cfg *config.Config, certMap map[string]ssl.Certificate) stri
 	}
 
 	// Nginx base configuration
-	sb.WriteString(fmt.Sprintf(`user nginx;
+	// NOTE: We intentionally omit the "user" directive to avoid warnings in non-root containers.
+	sb.WriteString(fmt.Sprintf(`
 worker_processes auto;
 error_log stderr %s;
-pid /var/run/nginx.pid;
+pid /tmp/nginx.pid;
 
 events {
     worker_connections 1024;
@@ -267,6 +267,13 @@ http {
 
     # Allow large file uploads
     client_max_body_size 100M;
+
+	# Temp paths for non-root containers
+	client_body_temp_path /tmp/nginx/client_body;
+	proxy_temp_path /tmp/nginx/proxy;
+	fastcgi_temp_path /tmp/nginx/fastcgi;
+	uwsgi_temp_path /tmp/nginx/uwsgi;
+	scgi_temp_path /tmp/nginx/scgi;
 
     # Proxy buffer settings
     proxy_buffering on;

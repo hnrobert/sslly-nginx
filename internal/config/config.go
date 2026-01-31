@@ -99,12 +99,30 @@ func ParseStaticSiteKey(key string) (StaticSiteSpec, bool, error) {
 	}
 
 	// Bracket syntax: [DIR]/route
+	// IMPORTANT: brackets are NOT exclusive to static-site mappings.
+	// Only treat them as static-site mappings when DIR starts with '.' or '/'.
 	if strings.HasPrefix(k, "[") {
 		close := strings.Index(k, "]")
 		if close < 0 {
-			return StaticSiteSpec{}, true, fmt.Errorf("invalid static site mapping %q: missing closing ']'", k)
+			// If it *looks* like a static mapping ("[./" or "[/"), report a helpful error.
+			if strings.HasPrefix(k, "[.") || strings.HasPrefix(k, "[/") {
+				return StaticSiteSpec{}, true, fmt.Errorf("invalid static site mapping %q: missing closing ']'", k)
+			}
+			return StaticSiteSpec{}, false, nil
 		}
 		inside := strings.TrimSpace(k[1:close])
+		if inside == "" {
+			// Treat as static mapping only when it looks like one.
+			if strings.HasPrefix(k, "[.") || strings.HasPrefix(k, "[/") {
+				return StaticSiteSpec{}, true, fmt.Errorf("invalid static site mapping %q: empty directory", k)
+			}
+			return StaticSiteSpec{}, false, nil
+		}
+		if !(strings.HasPrefix(inside, ".") || strings.HasPrefix(inside, "/")) {
+			// Not a static site mapping (e.g. [https]9143, [::1]:9000)
+			return StaticSiteSpec{}, false, nil
+		}
+
 		suffix := strings.TrimSpace(k[close+1:])
 		routePath := ""
 		if suffix != "" {
@@ -112,12 +130,6 @@ func ParseStaticSiteKey(key string) (StaticSiteSpec, bool, error) {
 				return StaticSiteSpec{}, true, fmt.Errorf("invalid static site mapping %q: route must start with '/'", k)
 			}
 			routePath = normalizeRoutePath(suffix)
-		}
-		if inside == "" {
-			return StaticSiteSpec{}, true, fmt.Errorf("invalid static site mapping %q: empty directory", k)
-		}
-		if !(strings.HasPrefix(inside, ".") || strings.HasPrefix(inside, "/")) {
-			return StaticSiteSpec{}, true, fmt.Errorf("invalid static site mapping %q: directory must start with '.' or '/'", k)
 		}
 
 		// Optional ':PORT' suffix inside the brackets.
@@ -531,7 +543,7 @@ func writeYAMLNodeFile(path string, doc *yaml.Node) error {
 	if doc == nil {
 		return fmt.Errorf("failed to write %s: nil yaml document", filepath.Base(path))
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0777); err != nil {
 		return fmt.Errorf("failed to create config dir for %s: %w", filepath.Base(path), err)
 	}
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0666)
@@ -590,7 +602,7 @@ func writeYAMLFile(path string, v any) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal yaml for %s: %w", filepath.Base(path), err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0777); err != nil {
 		return fmt.Errorf("failed to create config dir for %s: %w", filepath.Base(path), err)
 	}
 	if err := os.WriteFile(path, data, 0666); err != nil {
@@ -609,7 +621,7 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return fmt.Errorf("failed to read %s: %w", filepath.Base(src), err)
 	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dst), 0777); err != nil {
 		return fmt.Errorf("failed to create config dir for %s: %w", filepath.Base(dst), err)
 	}
 	if err := os.WriteFile(dst, data, 0666); err != nil {

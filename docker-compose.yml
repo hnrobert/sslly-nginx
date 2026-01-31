@@ -4,7 +4,6 @@ services:
     container_name: sslly-nginx
     network_mode: host
     restart: always
-    user: "1000:1000"
     volumes:
       - ./configs:/app/configs
       - ./ssl:/app/ssl

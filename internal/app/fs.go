@@ -21,7 +21,7 @@ func ensureConfigFile(destPath, defaultPath string) error {
 		return fmt.Errorf("default config not found at %s: %w", defaultPath, err)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(destPath), 0777); err != nil {
 		return err
 	}
 
@@ -41,24 +41,8 @@ func ensureConfigFile(destPath, defaultPath string) error {
 		return err
 	}
 
-	// Ensure permissive permissions so host user can write if necessary
-	// Files: 0666 (rw for all), Dirs: 0777 (rwx for all)
-	if err := os.Chmod(destPath, 0666); err != nil {
-		logger.Warn("failed to chmod %s: %v", destPath, err)
-	}
-	if err := os.Chmod(filepath.Dir(destPath), 0777); err != nil {
-		logger.Warn("failed to chmod %s: %v", filepath.Dir(destPath), err)
-	}
-
-	// If running as root inside the image, attempt to chown files to UID/GID 1000:1000
-	if os.Geteuid() == 0 {
-		if err := os.Chown(destPath, 1000, 1000); err != nil {
-			logger.Warn("failed to chown %s: %v", destPath, err)
-		}
-		if err := os.Chown(filepath.Dir(destPath), 1000, 1000); err != nil {
-			logger.Warn("failed to chown %s: %v", filepath.Dir(destPath), err)
-		}
-	}
+	// Do not chmod/chown bind-mounted paths at runtime.
+	// Many environments deny permission changes, and we don't want to mutate host file permissions.
 
 	logger.Info("Config file not found, copied default config: %s -> %s", defaultPath, destPath)
 	return nil
@@ -67,45 +51,20 @@ func ensureConfigFile(destPath, defaultPath string) error {
 // ensureDirWritable makes a directory and its existing contents writable by any user,
 // and attempts to chown to UID/GID 1000 when running as root.
 func ensureDirWritable(dir string) error {
-	// Create if not exists
+	// Create if not exists.
+	// Use a conservative default; if the directory is a host-mounted volume, chmod/chown may be denied.
 	if err := os.MkdirAll(dir, 0777); err != nil {
 		return err
 	}
 
-	// Walk entries and set permissive permissions
-	entries, err := os.ReadDir(dir)
+	// Verify we can write to it.
+	tmp, err := os.CreateTemp(dir, ".writable-*")
 	if err != nil {
 		return err
 	}
-	for _, e := range entries {
-		p := filepath.Join(dir, e.Name())
-		if e.IsDir() {
-			if err := os.Chmod(p, 0777); err != nil {
-				logger.Warn("failed to chmod dir %s: %v", p, err)
-			}
-		} else {
-			if err := os.Chmod(p, 0666); err != nil {
-				logger.Warn("failed to chmod file %s: %v", p, err)
-			}
-		}
-		// Attempt chown if root
-		if os.Geteuid() == 0 {
-			if err := os.Chown(p, 1000, 1000); err != nil {
-				// Not fatal
-				logger.Warn("failed to chown %s: %v", p, err)
-			}
-		}
-	}
-
-	// Finally ensure dir itself has permissive perms and ownership
-	if err := os.Chmod(dir, 0777); err != nil {
-		logger.Warn("failed to chmod dir %s: %v", dir, err)
-	}
-	if os.Geteuid() == 0 {
-		if err := os.Chown(dir, 1000, 1000); err != nil {
-			logger.Warn("failed to chown dir %s: %v", dir, err)
-		}
-	}
+	name := tmp.Name()
+	_ = tmp.Close()
+	_ = os.Remove(name)
 
 	return nil
 }

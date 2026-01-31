@@ -83,16 +83,8 @@ func InitFileLogging() error {
 	// Create session directory named by startup time
 	sessionTime := time.Now().Format("20060102_150405")
 	logDir = filepath.Join("/app/logs", sessionTime)
-	if err := os.MkdirAll(logDir, 0755); err != nil {
+	if err := os.MkdirAll(logDir, 0777); err != nil {
 		return fmt.Errorf("failed to create log directory: %w", err)
-	}
-
-	// Set proper permissions for log directory (same as config directory)
-	if err := os.Chmod(logDir, 0777); err != nil {
-		return fmt.Errorf("failed to set log directory permissions: %w", err)
-	}
-	if err := os.Chmod(filepath.Dir(logDir), 0777); err != nil {
-		return fmt.Errorf("failed to set parent log directory permissions: %w", err)
 	}
 
 	// Open today's log file
@@ -113,15 +105,9 @@ func openLogFile() error {
 
 	// Open new file for today
 	logFilePath := filepath.Join(logDir, today+".log")
-	file, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	file, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
-	}
-
-	// Set proper permissions for log file (same as config files)
-	if err := os.Chmod(logFilePath, 0666); err != nil {
-		_ = file.Close()
-		return fmt.Errorf("failed to set log file permissions: %w", err)
 	}
 
 	logFile = file
