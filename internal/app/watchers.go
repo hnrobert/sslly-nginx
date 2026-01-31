@@ -2,12 +2,18 @@ package app
 
 import (
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/hnrobert/sslly-nginx/internal/logger"
 	"github.com/hnrobert/sslly-nginx/internal/watcher"
 )
+
+func isEffectiveConfigPath(p string) bool {
+	base := filepath.Base(p)
+	return base == "proxy.yaml" || base == "cors.yaml" || base == "logs.yaml"
+}
 
 func (a *App) setupWatchers() error {
 	// Watch config directory
@@ -35,7 +41,13 @@ func (a *App) setupWatchers() error {
 				if isInternalConfigPath(event.Name) {
 					continue
 				}
-				if event.Op&fsnotify.Write == fsnotify.Write || event.Op&fsnotify.Create == fsnotify.Create {
+				if !isEffectiveConfigPath(event.Name) {
+					continue
+				}
+				if event.Op&fsnotify.Write == fsnotify.Write ||
+					event.Op&fsnotify.Create == fsnotify.Create ||
+					event.Op&fsnotify.Rename == fsnotify.Rename ||
+					event.Op&fsnotify.Remove == fsnotify.Remove {
 					logger.Info("Config file changed: %s", event.Name)
 					a.scheduleReload()
 				}

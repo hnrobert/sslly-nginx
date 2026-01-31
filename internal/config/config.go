@@ -18,10 +18,19 @@ const (
 	corsConfigFile  = "cors.yaml"
 	logsConfigFile  = "logs.yaml"
 
+	exampleDirDefault = "/etc/sslly/configs/"
+
 	proxyExampleFile = "proxy.example.yaml"
 	corsExampleFile  = "cors.example.yaml"
 	logsExampleFile  = "logs.example.yaml"
 )
+
+func exampleDir() string {
+	if v := os.Getenv("SSLLY_EXAMPLE_DIR"); v != "" {
+		return v
+	}
+	return exampleDirDefault
+}
 
 // CORSConfig represents CORS configuration for a domain or wildcard
 type CORSConfig struct {
@@ -331,11 +340,17 @@ func ensureFileFromExample(configDir, filename, exampleFilename string) error {
 		return nil
 	}
 	// Prefer split example file
-	examplePath := filepath.Join(configDir, exampleFilename)
+	examplePath := filepath.Join(exampleDir(), exampleFilename)
 	if fileExists(examplePath) {
 		return copyFile(examplePath, dst)
 	}
-	// Create an empty file if no example exists.
+
+	// proxy.yaml is required; do not silently create an empty config.
+	if filename == proxyConfigFile {
+		return fmt.Errorf("missing required %s and no example found at %s", proxyConfigFile, examplePath)
+	}
+
+	// Optional files: keep behavior of ensuring they exist.
 	return os.WriteFile(dst, []byte{}, 0666)
 }
 

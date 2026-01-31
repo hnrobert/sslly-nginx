@@ -4,9 +4,13 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestLoadConfig(t *testing.T) {
+	t.Setenv("SSLLY_EXAMPLE_DIR", t.TempDir())
+
 	// Create temporary config directory
 	tmpDir := t.TempDir()
 
@@ -41,6 +45,8 @@ func TestLoadConfig(t *testing.T) {
 }
 
 func TestLoadConfigNotFound(t *testing.T) {
+	t.Setenv("SSLLY_EXAMPLE_DIR", t.TempDir())
+
 	tmpDir := t.TempDir()
 
 	_, err := Load(tmpDir)
@@ -50,6 +56,8 @@ func TestLoadConfigNotFound(t *testing.T) {
 }
 
 func TestLoadConfigEmpty(t *testing.T) {
+	t.Setenv("SSLLY_EXAMPLE_DIR", t.TempDir())
+
 	tmpDir := t.TempDir()
 
 	configPath := filepath.Join(tmpDir, "proxy.yaml")
@@ -64,6 +72,8 @@ func TestLoadConfigEmpty(t *testing.T) {
 }
 
 func TestParseUpstream(t *testing.T) {
+	t.Setenv("SSLLY_EXAMPLE_DIR", t.TempDir())
+
 	tests := []struct {
 		name       string
 		input      string
@@ -246,6 +256,8 @@ func TestParseUpstream(t *testing.T) {
 }
 
 func TestLoadConfigWithCORS(t *testing.T) {
+	t.Setenv("SSLLY_EXAMPLE_DIR", t.TempDir())
+
 	tmpDir := t.TempDir()
 
 	corsContent := "\"*\":\n" +
@@ -310,5 +322,217 @@ func TestLoadConfigWithCORS(t *testing.T) {
 	// Check regular port mapping still works
 	if len(cfg.Ports) != 1 {
 		t.Errorf("Expected 1 port mapping, got %d", len(cfg.Ports))
+	}
+}
+
+func writeFile(t *testing.T, path string, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func TestPrepare_NewUser_CreatesSplitFilesFromExample(t *testing.T) {
+	exampleDir := t.TempDir()
+	t.Setenv("SSLLY_EXAMPLE_DIR", exampleDir)
+
+	tmpDir := t.TempDir()
+
+	// New user: no proxy.yaml yet; only example exists in the example directory.
+	writeFile(t, filepath.Join(exampleDir, proxyExampleFile), "1234:\n  - example.com\n")
+
+	if err := Prepare(tmpDir); err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+
+	// proxy.yaml should exist and be loadable.
+	cfg, err := Load(tmpDir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if len(cfg.Ports) != 1 {
+		t.Fatalf("expected 1 port mapping, got %d", len(cfg.Ports))
+	}
+	if got := cfg.Ports["1234"]; len(got) != 1 || got[0] != "example.com" {
+		t.Fatalf("unexpected ports mapping: %#v", cfg.Ports)
+	}
+
+	// Split optional files should be present after Prepare.
+	for _, f := range []string{proxyConfigFile, corsConfigFile, logsConfigFile} {
+		if _, err := os.Stat(filepath.Join(tmpDir, f)); err != nil {
+			t.Fatalf("expected %s to exist: %v", f, err)
+		}
+	}
+}
+
+func TestPrepare_LegacyUser_MigratesAndBacksUp(t *testing.T) {
+	t.Setenv("SSLLY_EXAMPLE_DIR", t.TempDir())
+
+	tmpDir := t.TempDir()
+
+	legacy := `log:
+  sslly:
+    level: debug
+  nginx:
+    level: warn
+    stderr_as: error
+    stderr_show: warn
+
+cors:
+  "*":
+    allow_origin: "*"
+    allow_methods: [GET, POST]
+    allow_headers: [Content-Type]
+    expose_headers: [Content-Length]
+    max_age: 10
+    allow_credentials: false
+
+1234:
+  - a.com
+  - b.com
+`
+	legacyPath := filepath.Join(tmpDir, legacyConfigYAML)
+	writeFile(t, legacyPath, legacy)
+
+	if err := Prepare(tmpDir); err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+
+	// Legacy file should have been renamed.
+	if _, err := os.Stat(legacyPath); !os.IsNotExist(err) {
+		t.Fatalf("expected legacy file to be renamed, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, "config.backup.yaml")); err != nil {
+		t.Fatalf("expected backup file to exist: %v", err)
+	}
+
+	// Proxy should contain only port mappings (no top-level log/cors).
+	proxyBytes, err := os.ReadFile(filepath.Join(tmpDir, proxyConfigFile))
+	if err != nil {
+		t.Fatalf("read proxy: %v", err)
+	}
+	var proxyRoot map[string]any
+	if err := yaml.Unmarshal(proxyBytes, &proxyRoot); err != nil {
+		t.Fatalf("unmarshal proxy: %v", err)
+	}
+	if _, ok := proxyRoot["log"]; ok {
+		t.Fatalf("proxy.yaml should not contain 'log' key")
+	}
+	if _, ok := proxyRoot["cors"]; ok {
+		t.Fatalf("proxy.yaml should not contain 'cors' key")
+	}
+	if _, ok := proxyRoot["1234"]; !ok {
+		t.Fatalf("proxy.yaml should contain migrated port mapping")
+	}
+
+	// Logs should contain inner content (no outer 'log:').
+	logsBytes, err := os.ReadFile(filepath.Join(tmpDir, logsConfigFile))
+	if err != nil {
+		t.Fatalf("read logs: %v", err)
+	}
+	var logsRoot map[string]any
+	if err := yaml.Unmarshal(logsBytes, &logsRoot); err != nil {
+		t.Fatalf("unmarshal logs: %v", err)
+	}
+	if _, ok := logsRoot["sslly"]; !ok {
+		t.Fatalf("logs.yaml should contain 'sslly' key")
+	}
+	if _, ok := logsRoot["nginx"]; !ok {
+		t.Fatalf("logs.yaml should contain 'nginx' key")
+	}
+
+	// CORS should contain inner content (no outer 'cors:').
+	corsBytes, err := os.ReadFile(filepath.Join(tmpDir, corsConfigFile))
+	if err != nil {
+		t.Fatalf("read cors: %v", err)
+	}
+	var corsRoot map[string]any
+	if err := yaml.Unmarshal(corsBytes, &corsRoot); err != nil {
+		t.Fatalf("unmarshal cors: %v", err)
+	}
+	if _, ok := corsRoot["*"]; !ok {
+		t.Fatalf("cors.yaml should contain wildcard config")
+	}
+}
+
+func TestPrepare_LegacyUser_WhenBackupExists_UsesTimestampSuffix(t *testing.T) {
+	t.Setenv("SSLLY_EXAMPLE_DIR", t.TempDir())
+
+	tmpDir := t.TempDir()
+
+	writeFile(t, filepath.Join(tmpDir, legacyConfigYAML), "1234:\n  - a.com\n")
+	// Pre-existing backup should force timestamped name.
+	writeFile(t, filepath.Join(tmpDir, "config.backup.yaml"), "already-here")
+
+	if err := Prepare(tmpDir); err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+
+	// We should now have at least one additional backup besides the pre-existing one.
+	matches, err := filepath.Glob(filepath.Join(tmpDir, "config.backup.*.yaml"))
+	if err != nil {
+		t.Fatalf("glob backups: %v", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("expected 1 timestamped backup, got %d: %v", len(matches), matches)
+	}
+}
+
+func TestPrepare_LegacyUser_DoesNotOverwriteExistingSplitFiles(t *testing.T) {
+	t.Setenv("SSLLY_EXAMPLE_DIR", t.TempDir())
+
+	tmpDir := t.TempDir()
+
+	// Existing split proxy.yaml should be kept.
+	existingProxy := "1234:\n  - keep.me\n"
+	writeFile(t, filepath.Join(tmpDir, proxyConfigFile), existingProxy)
+
+	// Legacy config has different mapping; it should be backed up but NOT overwrite proxy.yaml.
+	writeFile(t, filepath.Join(tmpDir, legacyConfigYAML), "5678:\n  - should.not.win\n")
+
+	if err := Prepare(tmpDir); err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(tmpDir, proxyConfigFile))
+	if err != nil {
+		t.Fatalf("read proxy: %v", err)
+	}
+	if string(got) != existingProxy {
+		t.Fatalf("proxy.yaml was overwritten; got=%q want=%q", string(got), existingProxy)
+	}
+
+	// Legacy should still be renamed.
+	if _, err := os.Stat(filepath.Join(tmpDir, "config.backup.yaml")); err != nil {
+		t.Fatalf("expected backup file to exist: %v", err)
+	}
+}
+
+func TestLoad_LoadsLogsConfig(t *testing.T) {
+	t.Setenv("SSLLY_EXAMPLE_DIR", t.TempDir())
+
+	tmpDir := t.TempDir()
+
+	writeFile(t, filepath.Join(tmpDir, proxyConfigFile), "1234:\n  - example.com\n")
+	writeFile(t, filepath.Join(tmpDir, logsConfigFile), "sslly:\n  level: debug\nnginx:\n  level: info\n  stderr_as: error\n  stderr_show: warn\n")
+
+	cfg, err := Load(tmpDir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfg.Log.SSLLY.Level != "debug" {
+		t.Fatalf("expected sslly log level debug, got %q", cfg.Log.SSLLY.Level)
+	}
+	if cfg.Log.Nginx.Level != "info" {
+		t.Fatalf("expected nginx log level info, got %q", cfg.Log.Nginx.Level)
+	}
+	if cfg.Log.Nginx.StderrAs != "error" {
+		t.Fatalf("expected nginx stderr_as error, got %q", cfg.Log.Nginx.StderrAs)
+	}
+	if cfg.Log.Nginx.StderrShow != "warn" {
+		t.Fatalf("expected nginx stderr_show warn, got %q", cfg.Log.Nginx.StderrShow)
 	}
 }
