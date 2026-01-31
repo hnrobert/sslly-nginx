@@ -14,10 +14,10 @@ import (
 )
 
 const (
-	configDir           = "./configs"
-	sslDir              = "./ssl"
-	runtimeDir          = "./configs/.sslly-runtime"
-	nginxConf           = "/etc/nginx/nginx.conf"
+	configDir  = "./configs"
+	sslDir     = "./ssl"
+	runtimeDir = "./configs/.sslly-runtime"
+	nginxConf  = "/etc/nginx/nginx.conf"
 )
 
 type App struct {
