@@ -79,19 +79,69 @@ type StaticSiteSpec struct {
 	Dir     string
 	Port    int
 	HasPort bool
+	// RoutePath is an optional URL path prefix (e.g. "/home") used to build domain/path routes.
+	// It is NOT a filesystem path.
+	RoutePath string
 }
 
 // ParseStaticSiteKey parses a proxy.yaml mapping key that represents a local static directory.
 //
 // Rules:
-// - If the key starts with '.' or '/', it's treated as a filesystem directory.
-// - If the key ends with ':PORT' (PORT must be numeric), that port is used.
-// - Otherwise, the app will auto-assign an available local port (starting from 10000).
+//   - If the key starts with '.' or '/', it's treated as a filesystem directory.
+//   - If the key is in the form "[DIR]/route" (or "[DIR:PORT]/route"), DIR is treated as a filesystem directory
+//     and "/route" is used as the domain route prefix.
+//   - If the key ends with ':PORT' (PORT must be numeric), that port is used.
+//   - Otherwise, the app will auto-assign an available local port (starting from 10000).
 func ParseStaticSiteKey(key string) (StaticSiteSpec, bool, error) {
 	k := strings.TrimSpace(strings.TrimSuffix(key, ":"))
 	if k == "" {
 		return StaticSiteSpec{}, false, nil
 	}
+
+	// Bracket syntax: [DIR]/route
+	if strings.HasPrefix(k, "[") {
+		close := strings.Index(k, "]")
+		if close < 0 {
+			return StaticSiteSpec{}, true, fmt.Errorf("invalid static site mapping %q: missing closing ']'", k)
+		}
+		inside := strings.TrimSpace(k[1:close])
+		suffix := strings.TrimSpace(k[close+1:])
+		routePath := ""
+		if suffix != "" {
+			if !strings.HasPrefix(suffix, "/") {
+				return StaticSiteSpec{}, true, fmt.Errorf("invalid static site mapping %q: route must start with '/'", k)
+			}
+			routePath = normalizeRoutePath(suffix)
+		}
+		if inside == "" {
+			return StaticSiteSpec{}, true, fmt.Errorf("invalid static site mapping %q: empty directory", k)
+		}
+		if !(strings.HasPrefix(inside, ".") || strings.HasPrefix(inside, "/")) {
+			return StaticSiteSpec{}, true, fmt.Errorf("invalid static site mapping %q: directory must start with '.' or '/'", k)
+		}
+
+		// Optional ':PORT' suffix inside the brackets.
+		if idx := strings.LastIndex(inside, ":"); idx > 0 && idx < len(inside)-1 {
+			portPart := inside[idx+1:]
+			if isNumeric(portPart) {
+				p, err := strconv.Atoi(portPart)
+				if err != nil {
+					return StaticSiteSpec{}, true, fmt.Errorf("invalid static site port %q: %w", portPart, err)
+				}
+				if p <= 0 || p > 65535 {
+					return StaticSiteSpec{}, true, fmt.Errorf("invalid static site port %d", p)
+				}
+				dir := strings.TrimSpace(inside[:idx])
+				if dir == "" {
+					return StaticSiteSpec{}, true, fmt.Errorf("invalid static site path: empty")
+				}
+				return StaticSiteSpec{Dir: dir, Port: p, HasPort: true, RoutePath: routePath}, true, nil
+			}
+		}
+
+		return StaticSiteSpec{Dir: inside, HasPort: false, RoutePath: routePath}, true, nil
+	}
+
 	if !(strings.HasPrefix(k, ".") || strings.HasPrefix(k, "/")) {
 		return StaticSiteSpec{}, false, nil
 	}
@@ -116,6 +166,23 @@ func ParseStaticSiteKey(key string) (StaticSiteSpec, bool, error) {
 	}
 
 	return StaticSiteSpec{Dir: k, HasPort: false}, true, nil
+}
+
+func normalizeRoutePath(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return ""
+	}
+	if p == "/" {
+		return "/"
+	}
+	for strings.HasSuffix(p, "/") {
+		p = strings.TrimSuffix(p, "/")
+	}
+	if p == "" {
+		return "/"
+	}
+	return p
 }
 
 // ParseUpstream parses the key format which can be:

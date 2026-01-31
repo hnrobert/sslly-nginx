@@ -10,6 +10,8 @@
 # 5. [https]upstream: [domains]   - Proxies to upstream via HTTPS (prevents "plain HTTP to HTTPS port" errors)
 # 6. ./dir or /abs/dir: [domains] - Serves a local directory as a static site (auto-assigns an available port from 10000)
 # 7. ./dir:port: [domains]        - Serves a local directory as a static site on a fixed local port
+# 8. [./dir]/route: [domains]      - Serves a local directory on a specific URL route (auto-assigns port)
+# 9. [./dir:port]/route: [domains] - Serves a local directory on a specific URL route (fixed port)
 
 # Example 1: Proxy to localhost (default)
 1234:
@@ -56,3 +58,13 @@
 #
 # ./static:10080:
 #   - docs.example.com
+
+# Example 9: Static directory with a route prefix
+# This is a shortcut for writing the route in the domain list.
+#
+# "[/app/static/site1]/home":
+#   - yourdomain.com
+#
+# Equivalent to:
+# /app/static/site1:
+#   - yourdomain.com/home

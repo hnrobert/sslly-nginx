@@ -145,12 +145,17 @@ You can serve a local directory as a static website by using a path key (starts 
 # Or pin a specific local port (if the port is in use, this entry will error and others continue)
 ./static:10080:
   - docs.example.com
+
+# Route prefix shortcut: serve /home from this directory
+"[/app/static/site1]/home":
+  - yourdomain.com
 ```
 
 Notes:
 
 - Default `docker-compose.yml` mounts `./static` to `/app/static`.
 - If you omit the `:PORT` suffix, sslly-nginx will auto-pick a free port starting from `10000` and log it (including in the domain summary destinations).
+- The bracket form `"[DIR]/route"` is a shortcut for writing `yourdomain.com/route` in the domain list.
 
 ### SSL Certificate Structure
 

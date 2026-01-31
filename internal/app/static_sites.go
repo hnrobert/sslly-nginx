@@ -57,6 +57,7 @@ func (a *App) prepareStaticSitesForReload(cfg *config.Config) (*config.Config, f
 		dir     string
 		hasPort bool
 		port    int
+		route   string
 		domains []string
 	}
 
@@ -70,7 +71,7 @@ func (a *App) prepareStaticSitesForReload(cfg *config.Config) (*config.Config, f
 		if !ok {
 			continue
 		}
-		desiredSites[k] = desired{key: k, dir: spec.Dir, hasPort: spec.HasPort, port: spec.Port, domains: domains}
+		desiredSites[k] = desired{key: k, dir: spec.Dir, hasPort: spec.HasPort, port: spec.Port, route: spec.RoutePath, domains: domains}
 	}
 
 	// Fast path: no static sites.
@@ -215,7 +216,11 @@ func (a *App) prepareStaticSitesForReload(cfg *config.Config) (*config.Config, f
 			logger.Error("static site %q cannot use port %d because proxy.yaml already contains key %q; skipping", key, port, portKey)
 			continue
 		}
-		effective.Ports[portKey] = append([]string(nil), want.domains...)
+		domains := want.domains
+		if want.route != "" && want.route != "/" {
+			domains = applyStaticSiteRoute(domains, want.route)
+		}
+		effective.Ports[portKey] = append([]string(nil), domains...)
 	}
 
 	finalize := func(success bool) {
@@ -250,6 +255,30 @@ func (a *App) prepareStaticSitesForReload(cfg *config.Config) (*config.Config, f
 	}
 
 	return &effective, finalize, nil
+}
+
+func applyStaticSiteRoute(domains []string, route string) []string {
+	route = strings.TrimSpace(route)
+	if route == "" || route == "/" {
+		return append([]string(nil), domains...)
+	}
+	if !strings.HasPrefix(route, "/") {
+		route = "/" + route
+	}
+
+	out := make([]string, 0, len(domains))
+	for _, d := range domains {
+		ds := strings.TrimSpace(d)
+		if ds == "" {
+			continue
+		}
+		if strings.Contains(ds, "/") {
+			out = append(out, ds)
+			continue
+		}
+		out = append(out, ds+route)
+	}
+	return out
 }
 
 func sameDir(a, b string) bool {
