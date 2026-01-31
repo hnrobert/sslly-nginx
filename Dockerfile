@@ -19,9 +19,6 @@ FROM nginx:alpine
 # Install required tools
 RUN apk add --no-cache ca-certificates openssl
 
-# Copy the binary from builder
-COPY --from=builder /build/sslly-nginx /app/sslly-nginx
-
 # Create necessary directories
 RUN mkdir -p /app/configs /app/ssl /etc/nginx/ssl /etc/sslly/configs /var/run \
     && chmod -R g+rwX,u+rwX,o+rX /app /etc/nginx /etc/sslly/configs /var/run || true
@@ -48,6 +45,9 @@ RUN ln -sf /dev/stdout /var/log/nginx/access.log \
 
 # Ensure default configs are world-readable
 RUN chmod 0644 /etc/sslly/configs/*.yaml || true
+
+# Copy the binary from builder
+COPY --from=builder /build/sslly-nginx /app/sslly-nginx
 
 # Set working directory
 WORKDIR /app
