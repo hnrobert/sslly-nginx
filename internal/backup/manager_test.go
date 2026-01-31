@@ -25,7 +25,7 @@ func TestCrashRecoveryRestoresLastGood(t *testing.T) {
 	}
 
 	goodConfig := []byte("1234:\n  - good.example.com\n")
-	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), goodConfig, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(configDir, "proxy.yaml"), goodConfig, 0644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(sslDir, "note.txt"), []byte("good"), 0644); err != nil {
@@ -51,7 +51,7 @@ func TestCrashRecoveryRestoresLastGood(t *testing.T) {
 	}
 
 	// Mutate to a "bad" state and start a new in-progress snapshot (simulate crash).
-	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte("9999:\n  - bad.example.com\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(configDir, "proxy.yaml"), []byte("9999:\n  - bad.example.com\n"), 0644); err != nil {
 		t.Fatalf("write bad config: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(sslDir, "note.txt"), []byte("bad"), 0644); err != nil {
@@ -81,7 +81,7 @@ func TestCrashRecoveryRestoresLastGood(t *testing.T) {
 		t.Fatalf("expected restore to happen")
 	}
 
-	gotCfg, err := os.ReadFile(filepath.Join(configDir, "config.yaml"))
+	gotCfg, err := os.ReadFile(filepath.Join(configDir, "proxy.yaml"))
 	if err != nil {
 		t.Fatalf("read config: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestAbortClearsInProgress(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(runtimeDir, "current"), 0755); err != nil {
 		t.Fatalf("mkdir runtime: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte("1234:\n  - example.com\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(configDir, "proxy.yaml"), []byte("1234:\n  - example.com\n"), 0644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 

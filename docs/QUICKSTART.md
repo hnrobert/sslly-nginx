@@ -30,7 +30,7 @@ That's it! The service will start with default configuration and create necessar
 
 ### Customize Configuration
 
-Edit `configs/config.yaml` to change or add routes and meeting your requirements. Format Options:
+Edit `configs/proxy.yaml` to change or add routes and meeting your requirements. Format Options:
 
 ```yaml
 # Format Options:
@@ -72,10 +72,13 @@ Notes:
 2. Copy the example configuration:
 
    ```bash
-   cp configs/config.example.yaml configs/config.yaml
+   cp configs/proxy.example.yaml configs/proxy.yaml
+   # Optional (only if you need these features)
+   cp configs/cors.example.yaml configs/cors.yaml
+   cp configs/logs.example.yaml configs/logs.yaml
    ```
 
-3. Edit `configs/config.yaml` with your port-to-domain mappings
+3. Edit `configs/proxy.yaml` with your port-to-domain mappings
 
 4. Build and Start the service:
 

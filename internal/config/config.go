@@ -5,8 +5,22 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
+)
+
+const (
+	legacyConfigYAML = "config.yaml"
+	legacyConfigYML  = "config.yml"
+
+	proxyConfigFile = "proxy.yaml"
+	corsConfigFile  = "cors.yaml"
+	logsConfigFile  = "logs.yaml"
+
+	proxyExampleFile = "proxy.example.yaml"
+	corsExampleFile  = "cors.example.yaml"
+	logsExampleFile  = "logs.example.yaml"
 )
 
 // CORSConfig represents CORS configuration for a domain or wildcard
@@ -164,40 +178,196 @@ func isNumeric(s string) bool {
 }
 
 func Load(configDir string) (*Config, error) {
-	// Try config.yaml first, then config.yml
-	configPaths := []string{
-		filepath.Join(configDir, "config.yaml"),
-		filepath.Join(configDir, "config.yml"),
+	if err := Prepare(configDir); err != nil {
+		return nil, err
 	}
 
-	var configPath string
-	for _, path := range configPaths {
-		if _, err := os.Stat(path); err == nil {
-			configPath = path
-			break
-		}
-	}
-
-	if configPath == "" {
-		return nil, fmt.Errorf("no config file found in %s (tried config.yaml and config.yml)", configDir)
-	}
-
-	data, err := os.ReadFile(configPath)
+	proxyPath := filepath.Join(configDir, proxyConfigFile)
+	proxyData, err := os.ReadFile(proxyPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read config file: %w", err)
+		return nil, fmt.Errorf("failed to read %s: %w", proxyConfigFile, err)
 	}
 
 	var config Config
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("failed to parse config file: %w", err)
+	if err := yaml.Unmarshal(proxyData, &config); err != nil {
+		return nil, fmt.Errorf("failed to parse %s: %w", proxyConfigFile, err)
 	}
 
-	// Remove "cors" from Ports map if it exists (it's already in config.CORS)
+	// Load optional logs config (content is the inner object, without outer 'log:')
+	logsPath := filepath.Join(configDir, logsConfigFile)
+	if data, err := os.ReadFile(logsPath); err == nil {
+		var logsCfg LogConfig
+		if err := yaml.Unmarshal(data, &logsCfg); err != nil {
+			return nil, fmt.Errorf("failed to parse %s: %w", logsConfigFile, err)
+		}
+		config.Log = logsCfg
+	}
+
+	// Load optional CORS config (content is the inner object, without outer 'cors:')
+	corsPath := filepath.Join(configDir, corsConfigFile)
+	if data, err := os.ReadFile(corsPath); err == nil {
+		var corsCfg map[string]CORSConfig
+		if err := yaml.Unmarshal(data, &corsCfg); err != nil {
+			return nil, fmt.Errorf("failed to parse %s: %w", corsConfigFile, err)
+		}
+		config.CORS = corsCfg
+	}
+
+	// Defensive: do not allow these keys to appear as ports.
 	delete(config.Ports, "cors")
+	delete(config.Ports, "log")
 
 	if len(config.Ports) == 0 {
-		return nil, fmt.Errorf("config file is empty or invalid")
+		return nil, fmt.Errorf("config is empty or invalid (%s has no proxy mappings)", proxyConfigFile)
 	}
 
 	return &config, nil
+}
+
+// Prepare ensures the configuration directory is ready for loading:
+// - If legacy config.yaml/config.yml exists, it is migrated to split files.
+// - If split files are missing, they are created from the corresponding example files.
+func Prepare(configDir string) error {
+	if err := migrateLegacyConfigIfPresent(configDir); err != nil {
+		return err
+	}
+	return ensureSplitConfigFiles(configDir)
+}
+
+func migrateLegacyConfigIfPresent(configDir string) error {
+	legacyPaths := []string{
+		filepath.Join(configDir, legacyConfigYAML),
+		filepath.Join(configDir, legacyConfigYML),
+	}
+
+	var legacyPath string
+	for _, p := range legacyPaths {
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			legacyPath = p
+			break
+		}
+	}
+	if legacyPath == "" {
+		return nil
+	}
+
+	proxyPath := filepath.Join(configDir, proxyConfigFile)
+	corsPath := filepath.Join(configDir, corsConfigFile)
+	logsPath := filepath.Join(configDir, logsConfigFile)
+
+	anySplitExists := fileExists(proxyPath) || fileExists(corsPath) || fileExists(logsPath)
+	if !anySplitExists {
+		data, err := os.ReadFile(legacyPath)
+		if err != nil {
+			return fmt.Errorf("failed to read legacy config %s: %w", filepath.Base(legacyPath), err)
+		}
+
+		var root map[any]any
+		if err := yaml.Unmarshal(data, &root); err != nil {
+			return fmt.Errorf("failed to parse legacy config %s: %w", filepath.Base(legacyPath), err)
+		}
+
+		// Extract cors/log blocks (if any)
+		if corsVal, ok := root["cors"]; ok {
+			if !fileExists(corsPath) {
+				if err := writeYAMLFile(corsPath, corsVal); err != nil {
+					return err
+				}
+			}
+			delete(root, "cors")
+		}
+		if logVal, ok := root["log"]; ok {
+			if !fileExists(logsPath) {
+				if err := writeYAMLFile(logsPath, logVal); err != nil {
+					return err
+				}
+			}
+			delete(root, "log")
+		}
+
+		if !fileExists(proxyPath) {
+			if err := writeYAMLFile(proxyPath, root); err != nil {
+				return err
+			}
+		}
+	}
+
+	// After splitting, ensure any missing files are created from examples.
+	if err := ensureSplitConfigFiles(configDir); err != nil {
+		return err
+	}
+
+	// Finally, rename legacy config to config.backup.yaml (or .yml)
+	legacyBase := filepath.Base(legacyPath)
+	backupName := "config.backup" + filepath.Ext(legacyBase)
+	backupPath := filepath.Join(configDir, backupName)
+	if fileExists(backupPath) {
+		ts := time.Now().UTC().Format("20060102T150405Z")
+		backupName = "config.backup." + ts + filepath.Ext(legacyBase)
+		backupPath = filepath.Join(configDir, backupName)
+	}
+	if err := os.Rename(legacyPath, backupPath); err != nil {
+		return fmt.Errorf("failed to rename legacy config to %s: %w", backupName, err)
+	}
+	return nil
+}
+
+func ensureSplitConfigFiles(configDir string) error {
+	if err := ensureFileFromExample(configDir, proxyConfigFile, proxyExampleFile); err != nil {
+		return err
+	}
+	if err := ensureFileFromExample(configDir, corsConfigFile, corsExampleFile); err != nil {
+		return err
+	}
+	if err := ensureFileFromExample(configDir, logsConfigFile, logsExampleFile); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ensureFileFromExample(configDir, filename, exampleFilename string) error {
+	dst := filepath.Join(configDir, filename)
+	if fileExists(dst) {
+		return nil
+	}
+	// Prefer split example file
+	examplePath := filepath.Join(configDir, exampleFilename)
+	if fileExists(examplePath) {
+		return copyFile(examplePath, dst)
+	}
+	// Create an empty file if no example exists.
+	return os.WriteFile(dst, []byte{}, 0666)
+}
+
+func writeYAMLFile(path string, v any) error {
+	data, err := yaml.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("failed to marshal yaml for %s: %w", filepath.Base(path), err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("failed to create config dir for %s: %w", filepath.Base(path), err)
+	}
+	if err := os.WriteFile(path, data, 0666); err != nil {
+		return fmt.Errorf("failed to write %s: %w", filepath.Base(path), err)
+	}
+	return nil
+}
+
+func fileExists(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && !st.IsDir()
+}
+
+func copyFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return fmt.Errorf("failed to read %s: %w", filepath.Base(src), err)
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return fmt.Errorf("failed to create config dir for %s: %w", filepath.Base(dst), err)
+	}
+	if err := os.WriteFile(dst, data, 0666); err != nil {
+		return fmt.Errorf("failed to write %s: %w", filepath.Base(dst), err)
+	}
+	return nil
 }

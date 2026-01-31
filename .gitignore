@@ -39,13 +39,16 @@ Thumbs.db
 # Local configuration and SSL certificates (examples are kept)
 configs/config.yaml
 configs/config.yml
+configs/proxy.yaml
+configs/cors.yaml
+configs/logs.yaml
 ssl/*
 
 # Build output
 bin/
 
 # Keep example files
-!configs/config.example.yaml
+!configs/*.example.yaml
 !ssl/README.md
 
 .venv

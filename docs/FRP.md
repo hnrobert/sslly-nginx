@@ -72,7 +72,7 @@ On your FRP server, ensure ports 80 and 443 are available for HTTP/HTTPS forward
 Expose your local development environment to clients or team members:
 
 ```yaml
-# configs/config.yaml - sslly-nginx configuration
+# configs/proxy.yaml - sslly-nginx proxy configuration
 3000:
   - dev.myapp.com
   - api.dev.myapp.com
@@ -103,7 +103,7 @@ customDomains = ["*.myapp.com", "myapp.com"]
 Make your home services accessible from anywhere:
 
 ```yaml
-# configs/config.yaml
+# configs/proxy.yaml
 8123:
   - homeassistant.mydomain.com
 32400:
@@ -115,7 +115,7 @@ Make your home services accessible from anywhere:
 Run different environments on different ports:
 
 ```yaml
-# configs/config.yaml
+# configs/proxy.yaml
 3000:
   - dev.example.com
 3001:

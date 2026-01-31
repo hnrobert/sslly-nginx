@@ -1,0 +1,41 @@
+# Example proxy mapping configuration for sslly-nginx
+# Copy this file to proxy.yaml and modify according to your needs
+
+# Proxy Mapping Configuration
+# Format Options:
+# 1. port: [domains]              - Proxies to localhost:port (127.0.0.1:port) via HTTP
+# 2. ip:port: [domains]           - Proxies to specified ip:port via HTTP
+# 3. hostname:port: [domains]     - Proxies to specified hostname:port via HTTP
+# 4. [ipv6]:port: [domains]       - Proxies to IPv6 address with brackets via HTTP
+# 5. [https]upstream: [domains]   - Proxies to upstream via HTTPS (prevents "plain HTTP to HTTPS port" errors)
+
+# Example 1: Proxy to localhost (default)
+1234:
+  - yourdomain.com
+  - www.yourdomain.com
+# 5678:
+#   - sub.yourdomain.com
+
+# Example 2: Proxy to another machine on LAN
+# 192.168.50.2:1234:
+#   - lan.example.com
+
+# Example 3: Proxy to a named host
+# example-server.local:8080:
+#   - remote.example.com
+
+# Example 4: Proxy to IPv6 address (use "[ipv6:with:brackets]:port")
+# "[2001:db8::1]:3000":
+#   - ipv6.example.com
+
+# Example 5: Proxy to HTTPS backend (use [https] prefix)
+# This prevents "400 Bad Request - The plain HTTP request was sent to HTTPS port" errors
+# "[https]192.168.50.2:8443":
+#   - secure-backend.example.com
+
+# Example 6: Shared Domain with different routes
+# 9012:
+#   - shared.example.com
+#
+# 192.168.50.2:3456/api:
+#   - shared.example.com/api

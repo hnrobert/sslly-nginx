@@ -17,7 +17,7 @@ func TestLoadConfig(t *testing.T) {
 5678:
   - b.com
 `
-	configPath := filepath.Join(tmpDir, "config.yaml")
+	configPath := filepath.Join(tmpDir, "proxy.yaml")
 	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
 		t.Fatalf("Failed to write test config: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestLoadConfigNotFound(t *testing.T) {
 func TestLoadConfigEmpty(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	configPath := filepath.Join(tmpDir, "config.yaml")
+	configPath := filepath.Join(tmpDir, "proxy.yaml")
 	if err := os.WriteFile(configPath, []byte(""), 0644); err != nil {
 		t.Fatalf("Failed to write test config: %v", err)
 	}
@@ -248,27 +248,25 @@ func TestParseUpstream(t *testing.T) {
 func TestLoadConfigWithCORS(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	configContent := `cors:
-  "*":
-    allow_origin: "*"
-    allow_methods:
-      - GET
-      - POST
-      - OPTIONS
-    allow_headers:
-      - Content-Type
-      - Authorization
-    expose_headers:
-      - Content-Length
-    max_age: 3600
-    allow_credentials: false
-
-1234:
-  - example.com
-`
-	configPath := filepath.Join(tmpDir, "config.yaml")
-	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
-		t.Fatalf("Failed to write test config: %v", err)
+	corsContent := "\"*\":\n" +
+		"  allow_origin: \"*\"\n" +
+		"  allow_methods:\n" +
+		"    - GET\n" +
+		"    - POST\n" +
+		"    - OPTIONS\n" +
+		"  allow_headers:\n" +
+		"    - Content-Type\n" +
+		"    - Authorization\n" +
+		"  expose_headers:\n" +
+		"    - Content-Length\n" +
+		"  max_age: 3600\n" +
+		"  allow_credentials: false\n"
+	proxyContent := "1234:\n  - example.com\n"
+	if err := os.WriteFile(filepath.Join(tmpDir, "cors.yaml"), []byte(corsContent), 0644); err != nil {
+		t.Fatalf("Failed to write test cors config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "proxy.yaml"), []byte(proxyContent), 0644); err != nil {
+		t.Fatalf("Failed to write test proxy config: %v", err)
 	}
 
 	cfg, err := Load(tmpDir)
