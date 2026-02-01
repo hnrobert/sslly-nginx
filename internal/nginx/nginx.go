@@ -393,6 +393,9 @@ http {
 
 `, baseDomain, httpPort, baseDomain))
 
+			spaUpstreams := make(map[string]string) // port -> scheme://addr
+			spaCors := generateCORSHeaders(corsConfig)
+
 			// Generate location blocks for each route (sorted by path length, longest first)
 			sortRoutesByPathLength(routes)
 			for _, route := range routes {
@@ -423,6 +426,72 @@ http {
 					}
 				}
 
+				isStatic := cfg != nil && cfg.RuntimeStaticPorts != nil && cfg.RuntimeStaticPorts[route.Upstream.Port]
+				hasIndex := cfg != nil && cfg.RuntimeStaticHasIndex != nil && cfg.RuntimeStaticHasIndex[route.Upstream.Port]
+				if isStatic && hasIndex {
+					// SPA deep-link support: serve index.html on 404 (except for /assets/).
+					assetsPath := "/assets/"
+					if locationPath != "/" {
+						assetsPath = locationPath + "assets/"
+					}
+					sb.WriteString(fmt.Sprintf(`        location ^~ %s {
+	    proxy_pass %s;
+	    proxy_http_version 1.1;
+
+	    # Standard proxy headers
+	    proxy_set_header Host $host;
+	    proxy_set_header X-Real-IP $remote_addr;
+	    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+	    proxy_set_header X-Forwarded-Host $http_host;
+	    proxy_set_header X-Forwarded-Proto $scheme;
+
+	    # WebSocket support
+	    proxy_set_header Upgrade $http_upgrade;
+	    proxy_set_header Connection "upgrade";
+
+	    # Timeouts
+	    proxy_connect_timeout 60s;
+	    proxy_send_timeout 60s;
+	    proxy_read_timeout 60s;
+
+%s
+	}
+
+`, assetsPath, proxyPass, spaCors))
+
+					sb.WriteString(fmt.Sprintf(`        location %s {
+	    proxy_pass %s;
+	    proxy_http_version 1.1;
+
+	    # Standard proxy headers
+	    proxy_set_header Host $host;
+	    proxy_set_header X-Real-IP $remote_addr;
+	    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+	    proxy_set_header X-Forwarded-Host $http_host;
+	    proxy_set_header X-Forwarded-Proto $scheme;
+
+	    # WebSocket support
+	    proxy_set_header Upgrade $http_upgrade;
+	    proxy_set_header Connection "upgrade";
+
+	    # Timeouts
+	    proxy_connect_timeout 60s;
+	    proxy_send_timeout 60s;
+	    proxy_read_timeout 60s;
+
+	    # SPA deep-link fallback
+	    proxy_intercept_errors on;
+	    error_page 404 = @spa_fallback_%s;
+
+%s
+	}
+
+`, locationPath, proxyPass, route.Upstream.Port, spaCors))
+
+					spaUpstreams[route.Upstream.Port] = fmt.Sprintf("%s://%s", route.Upstream.Scheme, upstreamAddr)
+					continue
+				}
+
 				sb.WriteString(fmt.Sprintf(`        location %s {
             proxy_pass %s;
             proxy_http_version 1.1;
@@ -449,6 +518,34 @@ http {
 `, locationPath, proxyPass, generateCORSHeaders(corsConfig)))
 			}
 
+			// Emit SPA fallback named locations (one per static upstream port).
+			for port, base := range spaUpstreams {
+				sb.WriteString(fmt.Sprintf(`        location @spa_fallback_%s {
+	    proxy_pass %s/index.html$is_args$args;
+	    proxy_http_version 1.1;
+
+	    # Standard proxy headers
+	    proxy_set_header Host $host;
+	    proxy_set_header X-Real-IP $remote_addr;
+	    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+	    proxy_set_header X-Forwarded-Host $http_host;
+	    proxy_set_header X-Forwarded-Proto $scheme;
+
+	    # WebSocket support
+	    proxy_set_header Upgrade $http_upgrade;
+	    proxy_set_header Connection "upgrade";
+
+	    # Timeouts
+	    proxy_connect_timeout 60s;
+	    proxy_send_timeout 60s;
+	    proxy_read_timeout 60s;
+
+%s
+	}
+
+`, port, base, spaCors))
+			}
+
 			sb.WriteString(`    }
 
 `)
@@ -468,6 +565,9 @@ http {
         ssl_prefer_server_ciphers on;
 
 `, baseDomain, httpsPort, baseDomain, cert.CertPath, cert.KeyPath))
+
+		spaUpstreams := make(map[string]string) // port -> scheme://addr
+		spaCors := generateCORSHeaders(corsConfig)
 
 		// Generate location blocks for each route
 		sortRoutesByPathLength(routes)
@@ -499,6 +599,77 @@ http {
 				}
 			}
 
+			isStatic := cfg != nil && cfg.RuntimeStaticPorts != nil && cfg.RuntimeStaticPorts[route.Upstream.Port]
+			hasIndex := cfg != nil && cfg.RuntimeStaticHasIndex != nil && cfg.RuntimeStaticHasIndex[route.Upstream.Port]
+			if isStatic && hasIndex {
+				assetsPath := "/assets/"
+				if locationPath != "/" {
+					assetsPath = locationPath + "assets/"
+				}
+				sb.WriteString(fmt.Sprintf(`        location ^~ %s {
+	    proxy_pass %s;
+	    proxy_http_version 1.1;
+
+	    # Standard proxy headers
+	    proxy_set_header Host $host;
+	    proxy_set_header X-Real-IP $remote_addr;
+	    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+	    proxy_set_header X-Forwarded-Host $http_host;
+	    proxy_set_header X-Forwarded-Proto $scheme;
+
+	    # WebSocket support
+	    proxy_set_header Upgrade $http_upgrade;
+	    proxy_set_header Connection "upgrade";
+
+	    # Set Secure flag for cookies when using HTTPS
+	    proxy_cookie_path / "/; Secure";
+
+	    # Timeouts
+	    proxy_connect_timeout 60s;
+	    proxy_send_timeout 60s;
+	    proxy_read_timeout 60s;
+
+%s
+	}
+
+`, assetsPath, proxyPass, spaCors))
+
+				sb.WriteString(fmt.Sprintf(`        location %s {
+	    proxy_pass %s;
+	    proxy_http_version 1.1;
+
+	    # Standard proxy headers
+	    proxy_set_header Host $host;
+	    proxy_set_header X-Real-IP $remote_addr;
+	    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+	    proxy_set_header X-Forwarded-Host $http_host;
+	    proxy_set_header X-Forwarded-Proto $scheme;
+
+	    # WebSocket support
+	    proxy_set_header Upgrade $http_upgrade;
+	    proxy_set_header Connection "upgrade";
+
+	    # Set Secure flag for cookies when using HTTPS
+	    proxy_cookie_path / "/; Secure";
+
+	    # Timeouts
+	    proxy_connect_timeout 60s;
+	    proxy_send_timeout 60s;
+	    proxy_read_timeout 60s;
+
+	    # SPA deep-link fallback
+	    proxy_intercept_errors on;
+	    error_page 404 = @spa_fallback_%s;
+
+%s
+	}
+
+`, locationPath, proxyPass, route.Upstream.Port, spaCors))
+
+				spaUpstreams[route.Upstream.Port] = fmt.Sprintf("%s://%s", route.Upstream.Scheme, upstreamAddr)
+				continue
+			}
+
 			// logger.Info("  Route: %s -> %s://%s (path: %s)", route.DomainPath, route.Upstream.Scheme, upstreamAddr, locationPath)
 
 			sb.WriteString(fmt.Sprintf(`        location %s {
@@ -528,6 +699,36 @@ http {
         }
 
 `, locationPath, proxyPass, generateCORSHeaders(corsConfig)))
+		}
+
+		for port, base := range spaUpstreams {
+			sb.WriteString(fmt.Sprintf(`        location @spa_fallback_%s {
+	    proxy_pass %s/index.html$is_args$args;
+	    proxy_http_version 1.1;
+
+	    # Standard proxy headers
+	    proxy_set_header Host $host;
+	    proxy_set_header X-Real-IP $remote_addr;
+	    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+	    proxy_set_header X-Forwarded-Host $http_host;
+	    proxy_set_header X-Forwarded-Proto $scheme;
+
+	    # WebSocket support
+	    proxy_set_header Upgrade $http_upgrade;
+	    proxy_set_header Connection "upgrade";
+
+	    # Set Secure flag for cookies when using HTTPS
+	    proxy_cookie_path / "/; Secure";
+
+	    # Timeouts
+	    proxy_connect_timeout 60s;
+	    proxy_send_timeout 60s;
+	    proxy_read_timeout 60s;
+
+%s
+	}
+
+`, port, base, spaCors))
 		}
 
 		sb.WriteString(`    }

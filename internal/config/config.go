@@ -73,6 +73,13 @@ type Config struct {
 	Log   LogConfig             `yaml:"log"`
 	CORS  map[string]CORSConfig `yaml:"cors"`
 	Ports map[string][]string   `yaml:",inline"`
+
+	// RuntimeStaticPorts marks numeric upstream ports that were generated from static-site mappings.
+	// It is runtime-only (not persisted to YAML).
+	RuntimeStaticPorts map[string]bool `yaml:"-"`
+	// RuntimeStaticHasIndex marks static-site ports whose directory contains an index.html.
+	// Used to enable SPA-style deep-link fallback in nginx.
+	RuntimeStaticHasIndex map[string]bool `yaml:"-"`
 }
 
 type StaticSiteSpec struct {

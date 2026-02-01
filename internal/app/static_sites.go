@@ -19,6 +19,7 @@ type runningStaticSite struct {
 	OriginalKey string
 	Dir         string
 	Port        int
+	HasIndex    bool
 	Server      *http.Server
 	Listener    net.Listener
 }
@@ -136,6 +137,10 @@ func (a *App) prepareStaticSitesForReload(cfg *config.Config) (*config.Config, f
 			logger.Error("%v", err)
 			continue
 		}
+		hasIndex := false
+		if st, err := os.Stat(filepath.Join(absDir, "index.html")); err == nil && !st.IsDir() {
+			hasIndex = true
+		}
 
 		port := want.port
 		ln, chosenPort, err := func() (net.Listener, int, error) {
@@ -173,7 +178,7 @@ func (a *App) prepareStaticSitesForReload(cfg *config.Config) (*config.Config, f
 		srv := &http.Server{
 			Handler: http.FileServer(http.Dir(absDir)),
 		}
-		site := &runningStaticSite{OriginalKey: key, Dir: absDir, Port: port, Server: srv, Listener: ln}
+		site := &runningStaticSite{OriginalKey: key, Dir: absDir, Port: port, HasIndex: hasIndex, Server: srv, Listener: ln}
 		pendingAdds[key] = site
 
 		go func(key string, s *runningStaticSite) {
@@ -188,11 +193,27 @@ func (a *App) prepareStaticSitesForReload(cfg *config.Config) (*config.Config, f
 	// Build effective config: rewrite static keys to numeric ports, drop invalid ones.
 	effective := *cfg
 	effective.Ports = make(map[string][]string, len(cfg.Ports))
+	effective.RuntimeStaticPorts = make(map[string]bool)
+	effective.RuntimeStaticHasIndex = make(map[string]bool)
 	for k, v := range cfg.Ports {
 		if _, ok := desiredSites[k]; ok {
 			continue
 		}
 		effective.Ports[k] = append([]string(nil), v...)
+	}
+	for _, s := range keep {
+		pk := strconv.Itoa(s.Port)
+		effective.RuntimeStaticPorts[pk] = true
+		if s.HasIndex {
+			effective.RuntimeStaticHasIndex[pk] = true
+		}
+	}
+	for _, s := range pendingAdds {
+		pk := strconv.Itoa(s.Port)
+		effective.RuntimeStaticPorts[pk] = true
+		if s.HasIndex {
+			effective.RuntimeStaticHasIndex[pk] = true
+		}
 	}
 	for key, want := range desiredSites {
 		port := 0
