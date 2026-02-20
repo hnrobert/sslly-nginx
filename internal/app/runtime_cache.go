@@ -129,8 +129,10 @@ func stageRuntimeCertificates(snapshotID string, cfg *config.Config, scanned map
 			keyExt = ".key"
 		}
 
-		stageCertPath := filepath.Join(stageDir, "certs", safe+certExt)
-		stageKeyPath := filepath.Join(stageDir, "certs", safe+keyExt)
+		stageCertName := safe + ".cert" + certExt
+		stageKeyName := safe + ".key" + keyExt
+		stageCertPath := filepath.Join(stageDir, "certs", stageCertName)
+		stageKeyPath := filepath.Join(stageDir, "certs", stageKeyName)
 		if err := copyFileContents(cert.CertPath, stageCertPath); err != nil {
 			return nil, fmt.Errorf("copy cert for %s: %w", baseDomain, err)
 		}
@@ -139,8 +141,8 @@ func stageRuntimeCertificates(snapshotID string, cfg *config.Config, scanned map
 		}
 
 		active[baseDomain] = ssl.Certificate{
-			CertPath: filepath.Join(currentDir, "certs", safe+certExt),
-			KeyPath:  filepath.Join(currentDir, "certs", safe+keyExt),
+			CertPath: filepath.Join(currentDir, "certs", stageCertName),
+			KeyPath:  filepath.Join(currentDir, "certs", stageKeyName),
 			NotAfter: cert.NotAfter,
 		}
 	}
