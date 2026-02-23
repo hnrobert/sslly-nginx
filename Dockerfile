@@ -19,12 +19,8 @@ FROM nginx:alpine
 # Install required tools
 RUN apk add --no-cache ca-certificates openssl
 
-# Copy the binary from builder
-COPY --from=builder /build/sslly-nginx /app/sslly-nginx
-
 # Create necessary directories
 RUN mkdir -p /app/configs /app/ssl /etc/nginx/ssl /etc/sslly/configs /var/run \
-    && chown -R 1000:1000 /app /app/configs /app/ssl || true \
     && chmod -R g+rwX,u+rwX,o+rX /app /etc/nginx /etc/sslly/configs /var/run || true
 
 ## Copy default configuration examples (used to auto-fill missing configs on first boot)
@@ -38,6 +34,10 @@ RUN openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
     -out /etc/nginx/ssl/dummy.crt \
     -subj "/C=US/ST=State/L=City/O=Organization/CN=dummy"
 
+# Ensure non-root nginx can read the dummy certificate/key
+RUN chmod 0755 /etc/nginx/ssl || true \
+    && chmod 0644 /etc/nginx/ssl/dummy.crt /etc/nginx/ssl/dummy.key || true
+
 # Forward nginx logs to Docker log collector
 # This allows nginx access and error logs to be visible via 'docker logs'
 RUN ln -sf /dev/stdout /var/log/nginx/access.log \
@@ -46,11 +46,8 @@ RUN ln -sf /dev/stdout /var/log/nginx/access.log \
 # Ensure default configs are world-readable
 RUN chmod 0644 /etc/sslly/configs/*.yaml || true
 
-# Create non-root runtime user (UID/GID 1000) to match common host user
-# and ensure directories are accessible when container runs as that user
-RUN addgroup -g 1000 sslly 2>/dev/null || true \
-    && adduser -D -u 1000 -G sslly -s /bin/sh sslly 2>/dev/null || true \
-    && chown -R sslly:sslly /app /etc/sslly/configs /etc/nginx /var/run || true
+# Copy the binary from builder
+COPY --from=builder /build/sslly-nginx /app/sslly-nginx
 
 # Set working directory
 WORKDIR /app

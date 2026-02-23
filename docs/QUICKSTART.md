@@ -40,6 +40,21 @@ Edit `configs/proxy.yaml` to change or add routes and meeting your requirements.
 # 4. "[ipv6]:port": [domains]     - Proxies to IPv6 address (add brackets)
 # 5. "[https]ip:port": [domains]  - Proxies to HTTPS backend (adds [https] prefix)
 # 6. ip:port/path: [domain/paths] - Proxies to specific path on localhost:port
+# 7. ./dir or /abs/dir: [domains] - Serves a local directory as a static site (auto-assigns an available port from 10000)
+# 8. ./dir:port: [domains]        - Serves a local directory as a static site on a fixed local port
+# 9. [./dir]/route: [domains]      - Serves a local directory on a URL route (shortcut for writing domain/route)
+```
+
+Static site example:
+
+```yaml
+# docker-compose.yml mounts ./static -> /app/static by default
+/app/static:
+   - static.example.com
+
+# Route prefix shortcut
+"[/app/static/site1]/home":
+   - yourdomain.com
 ```
 
 ### Add SSL Certificates

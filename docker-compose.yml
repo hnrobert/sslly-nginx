@@ -4,11 +4,11 @@ services:
     container_name: sslly-nginx
     network_mode: host
     restart: always
-    user: "1000:1000"
     volumes:
       - ./configs:/app/configs
       - ./ssl:/app/ssl
       - ./logs:/app/logs
+      - ./static:/app/static
     environment:
       - TZ=Asia/Shanghai
       - LANG=zh_CN.UTF-8

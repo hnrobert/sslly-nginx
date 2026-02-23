@@ -18,7 +18,7 @@ A smart Nginx SSL reverse proxy manager that automatically configures SSL certif
 
 `sslly-nginx` is a Go application that runs inside an Nginx Alpine container and manages the Nginx configuration dynamically:
 
-1. **Configuration Monitoring**: Watches `./configs/*.yaml` for changes
+1. **Configuration Monitoring**: Watches `./configs/proxy.yaml` (and optional `./configs/cors.yaml` / `./configs/logs.yaml`) for changes
 2. **Certificate Scanning**: Recursively scans `./ssl` directory for certificate files
 3. **Nginx Generation**: Generates Nginx configuration based on port-to-domain mappings
 4. **Health Checks**: Verifies Nginx health after each reload
@@ -132,6 +132,30 @@ This generates Nginx configuration with location-based routing:
   - Example: `[https]192.168.50.2:8443` forwards requests using HTTPS
 - `upstream/path` → Adds path routing to the upstream
   - Example: `192.168.50.2:5678/api` proxies `/api` requests to that backend
+
+#### Static Site: Serve a Directory
+
+You can serve a local directory as a static website by using a path key (starts with `.` or `/`) in `configs/proxy.yaml`.
+
+```yaml
+# Auto-assign an available local port starting from 10000
+/app/static:
+  - static.example.com
+
+# Or pin a specific local port (if the port is in use, this entry will error and others continue)
+./static:10080:
+  - docs.example.com
+
+# Route prefix shortcut: serve /home from this directory
+"[/app/static/site1]/home":
+  - yourdomain.com
+```
+
+Notes:
+
+- Default `docker-compose.yml` mounts `./static` to `/app/static`.
+- If you omit the `:PORT` suffix, sslly-nginx will auto-pick a free port starting from `10000` and log it (including in the domain summary destinations).
+- The bracket form `"[DIR]/route"` is a shortcut for writing `yourdomain.com/route` in the domain list.
 
 ### SSL Certificate Structure
 

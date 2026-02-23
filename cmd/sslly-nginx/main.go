@@ -10,6 +10,10 @@ import (
 )
 
 func main() {
+	// Ensure newly created files/dirs are not masked by umask.
+	// This helps keep generated configs/logs writable across users on bind mounts.
+	syscall.Umask(0)
+
 	// Initialize file logging
 	if err := logger.InitFileLogging(); err != nil {
 		logger.Warn("Failed to initialize file logging: %v", err)

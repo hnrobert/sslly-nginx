@@ -52,7 +52,7 @@ func NewManager(backupRoot, configDir, sslDir, runtimeDir, nginxConf string) (*M
 		runtimeDir: absRuntimeDir,
 		nginxConf:  nginxConf,
 	}
-	if err := os.MkdirAll(m.snapshotsDir(), 0755); err != nil {
+	if err := os.MkdirAll(m.snapshotsDir(), 0777); err != nil {
 		return nil, fmt.Errorf("create backup dir: %w", err)
 	}
 	return m, nil
@@ -87,7 +87,7 @@ func (m *Manager) Begin() (string, error) {
 	}
 
 	id := time.Now().UTC().Format("20060102T150405.000000000Z")
-	if err := os.MkdirAll(m.snapshotPath(id), 0755); err != nil {
+	if err := os.MkdirAll(m.snapshotPath(id), 0777); err != nil {
 		return "", fmt.Errorf("create snapshot dir: %w", err)
 	}
 
@@ -263,19 +263,19 @@ func (m *Manager) readStateLocked() (*state, error) {
 }
 
 func (m *Manager) writeStateLocked(st *state) error {
-	if err := os.MkdirAll(m.backupRoot, 0755); err != nil {
+	if err := os.MkdirAll(m.backupRoot, 0777); err != nil {
 		return fmt.Errorf("mkdir backup root: %w", err)
 	}
 	data, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal state: %w", err)
 	}
-	return writeFileAtomic(m.statePath(), data, 0644)
+	return writeFileAtomic(m.statePath(), data, 0666)
 }
 
 func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0777); err != nil {
 		return err
 	}
 	tmp, err := os.CreateTemp(dir, ".tmp-*")
@@ -300,7 +300,7 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 }
 
 func replaceDirContents(dstDir, srcDir string, keepNames map[string]bool) error {
-	if err := os.MkdirAll(dstDir, 0755); err != nil {
+	if err := os.MkdirAll(dstDir, 0777); err != nil {
 		return err
 	}
 
@@ -347,7 +347,7 @@ func copyDir(srcDir, dstDir string, skip func(srcPath string, d os.DirEntry) boo
 		dstPath := filepath.Join(dstDir, rel)
 
 		if d.IsDir() {
-			return os.MkdirAll(dstPath, 0755)
+			return os.MkdirAll(dstPath, 0777)
 		}
 
 		info, err := d.Info()
@@ -366,14 +366,11 @@ func copyFile(srcPath, dstPath string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dstPath), 0777); err != nil {
 		return err
 	}
-	if err := os.WriteFile(dstPath, data, 0644); err != nil {
+	if err := os.WriteFile(dstPath, data, 0666); err != nil {
 		return err
-	}
-	if info, err := os.Stat(srcPath); err == nil {
-		_ = os.Chmod(dstPath, info.Mode().Perm())
 	}
 	return nil
 }

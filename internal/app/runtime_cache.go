@@ -84,14 +84,11 @@ func copyFileContents(srcPath, dstPath string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dstPath), 0777); err != nil {
 		return err
 	}
-	if err := os.WriteFile(dstPath, data, 0644); err != nil {
+	if err := os.WriteFile(dstPath, data, 0666); err != nil {
 		return err
-	}
-	if info, err := os.Stat(srcPath); err == nil {
-		_ = os.Chmod(dstPath, info.Mode().Perm())
 	}
 	return nil
 }
@@ -108,7 +105,7 @@ func stageRuntimeCertificates(snapshotID string, cfg *config.Config, scanned map
 
 	// Fresh stage.
 	_ = os.RemoveAll(stageDir)
-	if err := os.MkdirAll(filepath.Join(stageDir, "certs"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(stageDir, "certs"), 0777); err != nil {
 		return nil, err
 	}
 
@@ -132,8 +129,10 @@ func stageRuntimeCertificates(snapshotID string, cfg *config.Config, scanned map
 			keyExt = ".key"
 		}
 
-		stageCertPath := filepath.Join(stageDir, "certs", safe+certExt)
-		stageKeyPath := filepath.Join(stageDir, "certs", safe+keyExt)
+		stageCertName := safe + ".cert" + certExt
+		stageKeyName := safe + ".key" + keyExt
+		stageCertPath := filepath.Join(stageDir, "certs", stageCertName)
+		stageKeyPath := filepath.Join(stageDir, "certs", stageKeyName)
 		if err := copyFileContents(cert.CertPath, stageCertPath); err != nil {
 			return nil, fmt.Errorf("copy cert for %s: %w", baseDomain, err)
 		}
@@ -142,8 +141,8 @@ func stageRuntimeCertificates(snapshotID string, cfg *config.Config, scanned map
 		}
 
 		active[baseDomain] = ssl.Certificate{
-			CertPath: filepath.Join(currentDir, "certs", safe+certExt),
-			KeyPath:  filepath.Join(currentDir, "certs", safe+keyExt),
+			CertPath: filepath.Join(currentDir, "certs", stageCertName),
+			KeyPath:  filepath.Join(currentDir, "certs", stageKeyName),
 			NotAfter: cert.NotAfter,
 		}
 	}
@@ -157,10 +156,10 @@ func writeRuntimeNginxConf(snapshotID string, nginxConfig string) error {
 		return err
 	}
 	p := filepath.Join(stageDir, "nginx", "nginx.conf")
-	if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(p), 0777); err != nil {
 		return err
 	}
-	return os.WriteFile(p, []byte(nginxConfig), 0644)
+	return os.WriteFile(p, []byte(nginxConfig), 0666)
 }
 
 func activateRuntimeSnapshot(snapshotID string) error {
@@ -180,7 +179,7 @@ func activateRuntimeSnapshot(snapshotID string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(root, 0755); err != nil {
+	if err := os.MkdirAll(root, 0777); err != nil {
 		return err
 	}
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -72,6 +73,135 @@ type Config struct {
 	Log   LogConfig             `yaml:"log"`
 	CORS  map[string]CORSConfig `yaml:"cors"`
 	Ports map[string][]string   `yaml:",inline"`
+
+	// RuntimeStaticPorts marks numeric upstream ports that were generated from static-site mappings.
+	// It is runtime-only (not persisted to YAML).
+	RuntimeStaticPorts map[string]bool `yaml:"-"`
+	// RuntimeStaticHasIndex marks static-site ports whose directory contains an index.html.
+	// Used to enable SPA-style deep-link fallback in nginx.
+	RuntimeStaticHasIndex map[string]bool `yaml:"-"`
+}
+
+type StaticSiteSpec struct {
+	Dir     string
+	Port    int
+	HasPort bool
+	// RoutePath is an optional URL path prefix (e.g. "/home") used to build domain/path routes.
+	// It is NOT a filesystem path.
+	RoutePath string
+}
+
+// ParseStaticSiteKey parses a proxy.yaml mapping key that represents a local static directory.
+//
+// Rules:
+//   - If the key starts with '.' or '/', it's treated as a filesystem directory.
+//   - If the key is in the form "[DIR]/route" (or "[DIR:PORT]/route"), DIR is treated as a filesystem directory
+//     and "/route" is used as the domain route prefix.
+//   - If the key ends with ':PORT' (PORT must be numeric), that port is used.
+//   - Otherwise, the app will auto-assign an available local port (starting from 10000).
+func ParseStaticSiteKey(key string) (StaticSiteSpec, bool, error) {
+	k := strings.TrimSpace(strings.TrimSuffix(key, ":"))
+	if k == "" {
+		return StaticSiteSpec{}, false, nil
+	}
+
+	// Bracket syntax: [DIR]/route
+	// IMPORTANT: brackets are NOT exclusive to static-site mappings.
+	// Only treat them as static-site mappings when DIR starts with '.' or '/'.
+	if strings.HasPrefix(k, "[") {
+		close := strings.Index(k, "]")
+		if close < 0 {
+			// If it *looks* like a static mapping ("[./" or "[/"), report a helpful error.
+			if strings.HasPrefix(k, "[.") || strings.HasPrefix(k, "[/") {
+				return StaticSiteSpec{}, true, fmt.Errorf("invalid static site mapping %q: missing closing ']'", k)
+			}
+			return StaticSiteSpec{}, false, nil
+		}
+		inside := strings.TrimSpace(k[1:close])
+		if inside == "" {
+			// Treat as static mapping only when it looks like one.
+			if strings.HasPrefix(k, "[.") || strings.HasPrefix(k, "[/") {
+				return StaticSiteSpec{}, true, fmt.Errorf("invalid static site mapping %q: empty directory", k)
+			}
+			return StaticSiteSpec{}, false, nil
+		}
+		if !(strings.HasPrefix(inside, ".") || strings.HasPrefix(inside, "/")) {
+			// Not a static site mapping (e.g. [https]9143, [::1]:9000)
+			return StaticSiteSpec{}, false, nil
+		}
+
+		suffix := strings.TrimSpace(k[close+1:])
+		routePath := ""
+		if suffix != "" {
+			if !strings.HasPrefix(suffix, "/") {
+				return StaticSiteSpec{}, true, fmt.Errorf("invalid static site mapping %q: route must start with '/'", k)
+			}
+			routePath = normalizeRoutePath(suffix)
+		}
+
+		// Optional ':PORT' suffix inside the brackets.
+		if idx := strings.LastIndex(inside, ":"); idx > 0 && idx < len(inside)-1 {
+			portPart := inside[idx+1:]
+			if isNumeric(portPart) {
+				p, err := strconv.Atoi(portPart)
+				if err != nil {
+					return StaticSiteSpec{}, true, fmt.Errorf("invalid static site port %q: %w", portPart, err)
+				}
+				if p <= 0 || p > 65535 {
+					return StaticSiteSpec{}, true, fmt.Errorf("invalid static site port %d", p)
+				}
+				dir := strings.TrimSpace(inside[:idx])
+				if dir == "" {
+					return StaticSiteSpec{}, true, fmt.Errorf("invalid static site path: empty")
+				}
+				return StaticSiteSpec{Dir: dir, Port: p, HasPort: true, RoutePath: routePath}, true, nil
+			}
+		}
+
+		return StaticSiteSpec{Dir: inside, HasPort: false, RoutePath: routePath}, true, nil
+	}
+
+	if !(strings.HasPrefix(k, ".") || strings.HasPrefix(k, "/")) {
+		return StaticSiteSpec{}, false, nil
+	}
+
+	// Optional ':PORT' suffix.
+	if idx := strings.LastIndex(k, ":"); idx > 0 && idx < len(k)-1 {
+		portPart := k[idx+1:]
+		if isNumeric(portPart) {
+			p, err := strconv.Atoi(portPart)
+			if err != nil {
+				return StaticSiteSpec{}, true, fmt.Errorf("invalid static site port %q: %w", portPart, err)
+			}
+			if p <= 0 || p > 65535 {
+				return StaticSiteSpec{}, true, fmt.Errorf("invalid static site port %d", p)
+			}
+			dir := strings.TrimSpace(k[:idx])
+			if dir == "" {
+				return StaticSiteSpec{}, true, fmt.Errorf("invalid static site path: empty")
+			}
+			return StaticSiteSpec{Dir: dir, Port: p, HasPort: true}, true, nil
+		}
+	}
+
+	return StaticSiteSpec{Dir: k, HasPort: false}, true, nil
+}
+
+func normalizeRoutePath(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return ""
+	}
+	if p == "/" {
+		return "/"
+	}
+	for strings.HasSuffix(p, "/") {
+		p = strings.TrimSuffix(p, "/")
+	}
+	if p == "" {
+		return "/"
+	}
+	return p
 }
 
 // ParseUpstream parses the key format which can be:
@@ -420,7 +550,7 @@ func writeYAMLNodeFile(path string, doc *yaml.Node) error {
 	if doc == nil {
 		return fmt.Errorf("failed to write %s: nil yaml document", filepath.Base(path))
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0777); err != nil {
 		return fmt.Errorf("failed to create config dir for %s: %w", filepath.Base(path), err)
 	}
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0666)
@@ -479,7 +609,7 @@ func writeYAMLFile(path string, v any) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal yaml for %s: %w", filepath.Base(path), err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0777); err != nil {
 		return fmt.Errorf("failed to create config dir for %s: %w", filepath.Base(path), err)
 	}
 	if err := os.WriteFile(path, data, 0666); err != nil {
@@ -498,7 +628,7 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return fmt.Errorf("failed to read %s: %w", filepath.Base(src), err)
 	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dst), 0777); err != nil {
 		return fmt.Errorf("failed to create config dir for %s: %w", filepath.Base(dst), err)
 	}
 	if err := os.WriteFile(dst, data, 0666); err != nil {
