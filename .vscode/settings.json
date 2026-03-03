@@ -33,5 +33,8 @@
         "venv",
         "writable",
         "yourdomain"
-    ]
+    ],
+    "markdownlint.config": {
+        "no-inline-html": false
+    }
 }

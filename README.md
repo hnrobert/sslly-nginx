@@ -2,17 +2,21 @@
 
 A smart Nginx SSL reverse proxy manager that automatically configures SSL certificates and proxies traffic to your local applications.
 
+> I HATE writing Nginx config, that's why this project was born.  
+> Just tell this tool the port and domain, and I handle the rest.
+> <p align="right"><strong>Robert He</strong></p>
+
 ![logo](assets/images/logo.png)
 
 ## Features
 
-- 🔄 **Automatic Configuration**: Watches for configuration and SSL certificate changes and automatically reloads Nginx
-- 🔒 **SSL Management**: Automatically scans and maps SSL certificates to domains
-- 🔁 **Hot Reload**: Updates Nginx configuration without downtime when files change
-- 🛡️ **Error Recovery**: Maintains the last working configuration and rolls back on failures
-- 🐳 **Docker Ready**: Runs as a containerized service with Docker Compose
-- 🌐 **FRP Integration**: Easy integration with FRP for secure remote access to local services
-- 🚀 **CI/CD Pipeline**: Includes GitHub Actions workflows for testing, building, and releasing
+- **Simple Rules**: Just map ports to domains in a YAML file, no more Nginx config writing
+- **Automatic Configuration**: Watches for configuration and SSL certificate changes and automatically reloads Nginx
+- **SSL Management**: Automatically scans and maps SSL certificates to domains
+- **Hot Reload**: Updates Nginx configuration without downtime when files change
+- **Error Recovery**: Maintains the last working configuration and rolls back on failures
+- **Docker Ready**: Runs as a containerized service with Docker Compose
+- **FRP Friendly**: Easy integration with FRP for secure remote access to local services
 
 ## How It Works
 
