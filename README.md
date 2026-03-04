@@ -18,6 +18,14 @@ A smart Nginx SSL reverse proxy manager that automatically configures SSL certif
 - **Docker Ready**: Runs as a containerized service with Docker Compose
 - **FRP Friendly**: Easy integration with FRP for secure remote access to local services
 
+### Supported Features
+
+- [x] HTTP and HTTPS proxying
+- [x] Automatic HTTP → HTTPS redirection for domains with valid certificates
+- [x] CORS configuration (optional)
+- [x] Custom log levels and formats (optional)
+- [x] WebSocket support
+
 ## How It Works
 
 `sslly-nginx` is a Go application that runs inside an Nginx Alpine container and manages the Nginx configuration dynamically:
