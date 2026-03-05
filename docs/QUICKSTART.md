@@ -38,23 +38,27 @@ Edit `configs/proxy.yaml` to change or add routes and meeting your requirements.
 # 2. ip:port: [domains]           - Proxies to specified ip:port
 # 3. hostname:port: [domains]     - Proxies to specified hostname:port
 # 4. "[ipv6]:port": [domains]     - Proxies to IPv6 address (add brackets)
-# 5. "[https]ip:port": [domains]  - Proxies to HTTPS backend (adds [https] prefix)
+# 5. "<https>ip:port": [domains]  - Proxies to HTTPS backend (adds <https> prefix)
 # 6. ip:port/path: [domain/paths] - Proxies to specific path on localhost:port
-# 7. ./dir or /abs/dir: [domains] - Serves a local directory as a static site (auto-assigns an available port from 10000)
-# 8. ./dir:port: [domains]        - Serves a local directory as a static site on a fixed local port
-# 9. [./dir]/route: [domains]      - Serves a local directory on a URL route (shortcut for writing domain/route)
+# 7. <tcp>port: [upstream]        - TCP stream forwarding
+# 8. <udp>port: [upstream]        - UDP stream forwarding
+# 9. ./dir or /abs/dir: [domains] - Serves a local directory as a static site (via Nginx root directive)
+# 10. [./dir]/route: [domains]    - Serves a local directory on a URL route
 ```
 
 Static site example:
 
 ```yaml
 # docker-compose.yml mounts ./static -> /app/static by default
+# Static files are served directly by Nginx for optimal performance
 /app/static:
    - static.example.com
 
-# Route prefix shortcut
+# Route prefix: serve files at /home path
 "[/app/static/site1]/home":
    - yourdomain.com
+
+# SPA support is automatically enabled if index.html exists
 ```
 
 ### Add SSL Certificates
@@ -128,9 +132,11 @@ For secure remote access to your local services, you can integrate `sslly-nginx`
 
    ```yaml
    environment:
-     - SSL_NGINX_HTTP_PORT=9980
-     - SSL_NGINX_HTTPS_PORT=9943
+     - SSLLY_DEFAULT_HTTP_LISTEN_PORT=9980
+     - SSLLY_DEFAULT_HTTPS_LISTEN_PORT=9943
    ```
+
+   > **Note:** The legacy environment variables `SSL_NGINX_HTTP_PORT` and `SSL_NGINX_HTTPS_PORT` are also supported for backward compatibility.
 
 2. **Configure FRP Client**: Create `frpc.toml`:
 

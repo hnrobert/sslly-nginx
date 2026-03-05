@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +23,16 @@ const (
 	proxyExampleFile = "proxy.example.yaml"
 	corsExampleFile  = "cors.example.yaml"
 	logsExampleFile  = "logs.example.yaml"
+)
+
+// Protocol represents the protocol type for listen/upstream configuration
+type Protocol string
+
+const (
+	ProtocolHTTP  Protocol = "http"
+	ProtocolHTTPS Protocol = "https"
+	ProtocolTCP   Protocol = "tcp"
+	ProtocolUDP   Protocol = "udp"
 )
 
 func exampleDir() string {
@@ -63,10 +72,28 @@ type LogConfig struct {
 
 // Upstream represents a backend server configuration
 type Upstream struct {
-	Scheme string // Protocol scheme: "http" or "https" (default: "http")
-	Host   string // IP address or hostname (default: 127.0.0.1)
-	Port   string // Port number
-	Path   string // Optional path prefix for routing
+	Scheme   string   // Protocol scheme: "http" or "https" (default: "http") - legacy field, use Protocol for new code
+	Protocol Protocol // Protocol type: http, https, tcp, udp
+	Host     string   // IP address or hostname (default: 127.0.0.1)
+	Port     string   // Port number
+	Path     string   // Optional path prefix for routing (HTTP/HTTPS only)
+}
+
+// ListenConfig represents a listening configuration
+type ListenConfig struct {
+	Protocol Protocol // Listen protocol: http, https, tcp, udp
+	Host     string   // Listen address (empty = all interfaces)
+	Port     string   // Listen port
+}
+
+// IsHTTP returns true if the protocol is HTTP or HTTPS
+func (p Protocol) IsHTTP() bool {
+	return p == ProtocolHTTP || p == ProtocolHTTPS
+}
+
+// IsStream returns true if the protocol is TCP or UDP (stream layer)
+func (p Protocol) IsStream() bool {
+	return p == ProtocolTCP || p == ProtocolUDP
 }
 
 type Config struct {
@@ -74,18 +101,14 @@ type Config struct {
 	CORS  map[string]CORSConfig `yaml:"cors"`
 	Ports map[string][]string   `yaml:",inline"`
 
-	// RuntimeStaticPorts marks numeric upstream ports that were generated from static-site mappings.
+	// RuntimeStaticSites stores static site information for nginx config generation.
+	// Key is the original config key (e.g., "/app/static" or "[/app/static]/route").
 	// It is runtime-only (not persisted to YAML).
-	RuntimeStaticPorts map[string]bool `yaml:"-"`
-	// RuntimeStaticHasIndex marks static-site ports whose directory contains an index.html.
-	// Used to enable SPA-style deep-link fallback in nginx.
-	RuntimeStaticHasIndex map[string]bool `yaml:"-"`
+	RuntimeStaticSites map[string]StaticSiteSpec `yaml:"-"`
 }
 
 type StaticSiteSpec struct {
-	Dir     string
-	Port    int
-	HasPort bool
+	Dir string
 	// RoutePath is an optional URL path prefix (e.g. "/home") used to build domain/path routes.
 	// It is NOT a filesystem path.
 	RoutePath string
@@ -93,31 +116,41 @@ type StaticSiteSpec struct {
 
 // ParseStaticSiteKey parses a proxy.yaml mapping key that represents a local static directory.
 //
-// Rules:
+// Rules (NEW - after refactoring):
 //   - If the key starts with '.' or '/', it's treated as a filesystem directory.
-//   - If the key is in the form "[DIR]/route" (or "[DIR:PORT]/route"), DIR is treated as a filesystem directory
+//   - If the key is in the form "[DIR]/route", DIR is treated as a filesystem directory
 //     and "/route" is used as the domain route prefix.
-//   - If the key ends with ':PORT' (PORT must be numeric), that port is used.
-//   - Otherwise, the app will auto-assign an available local port (starting from 10000).
+//   - Colons ':' are treated as part of the file path (NOT as port separators).
+//   - If the key has a <protocol> prefix, it is ignored.
 func ParseStaticSiteKey(key string) (StaticSiteSpec, bool, error) {
 	k := strings.TrimSpace(strings.TrimSuffix(key, ":"))
 	if k == "" {
 		return StaticSiteSpec{}, false, nil
 	}
 
+	// Check and ignore <protocol> prefix (should not be used for static sites)
+	if strings.HasPrefix(k, "<") {
+		closeIdx := strings.Index(k, ">")
+		if closeIdx > 0 {
+			// Note: We can't use logger here directly to avoid import cycle,
+			// so we'll just strip the prefix silently
+			k = strings.TrimSpace(k[closeIdx+1:])
+		}
+	}
+
 	// Bracket syntax: [DIR]/route
 	// IMPORTANT: brackets are NOT exclusive to static-site mappings.
 	// Only treat them as static-site mappings when DIR starts with '.' or '/'.
 	if strings.HasPrefix(k, "[") {
-		close := strings.Index(k, "]")
-		if close < 0 {
+		closeIdx := strings.Index(k, "]")
+		if closeIdx < 0 {
 			// If it *looks* like a static mapping ("[./" or "[/"), report a helpful error.
 			if strings.HasPrefix(k, "[.") || strings.HasPrefix(k, "[/") {
 				return StaticSiteSpec{}, true, fmt.Errorf("invalid static site mapping %q: missing closing ']'", k)
 			}
 			return StaticSiteSpec{}, false, nil
 		}
-		inside := strings.TrimSpace(k[1:close])
+		inside := strings.TrimSpace(k[1:closeIdx])
 		if inside == "" {
 			// Treat as static mapping only when it looks like one.
 			if strings.HasPrefix(k, "[.") || strings.HasPrefix(k, "[/") {
@@ -126,11 +159,11 @@ func ParseStaticSiteKey(key string) (StaticSiteSpec, bool, error) {
 			return StaticSiteSpec{}, false, nil
 		}
 		if !(strings.HasPrefix(inside, ".") || strings.HasPrefix(inside, "/")) {
-			// Not a static site mapping (e.g. [https]9143, [::1]:9000)
+			// Not a static site mapping (e.g. <https>9143, [::1]:9000)
 			return StaticSiteSpec{}, false, nil
 		}
 
-		suffix := strings.TrimSpace(k[close+1:])
+		suffix := strings.TrimSpace(k[closeIdx+1:])
 		routePath := ""
 		if suffix != "" {
 			if !strings.HasPrefix(suffix, "/") {
@@ -139,52 +172,16 @@ func ParseStaticSiteKey(key string) (StaticSiteSpec, bool, error) {
 			routePath = normalizeRoutePath(suffix)
 		}
 
-		// Optional ':PORT' suffix inside the brackets.
-		if idx := strings.LastIndex(inside, ":"); idx > 0 && idx < len(inside)-1 {
-			portPart := inside[idx+1:]
-			if isNumeric(portPart) {
-				p, err := strconv.Atoi(portPart)
-				if err != nil {
-					return StaticSiteSpec{}, true, fmt.Errorf("invalid static site port %q: %w", portPart, err)
-				}
-				if p <= 0 || p > 65535 {
-					return StaticSiteSpec{}, true, fmt.Errorf("invalid static site port %d", p)
-				}
-				dir := strings.TrimSpace(inside[:idx])
-				if dir == "" {
-					return StaticSiteSpec{}, true, fmt.Errorf("invalid static site path: empty")
-				}
-				return StaticSiteSpec{Dir: dir, Port: p, HasPort: true, RoutePath: routePath}, true, nil
-			}
-		}
-
-		return StaticSiteSpec{Dir: inside, HasPort: false, RoutePath: routePath}, true, nil
+		// Colons are now part of the directory path - no port parsing
+		return StaticSiteSpec{Dir: inside, RoutePath: routePath}, true, nil
 	}
 
 	if !(strings.HasPrefix(k, ".") || strings.HasPrefix(k, "/")) {
 		return StaticSiteSpec{}, false, nil
 	}
 
-	// Optional ':PORT' suffix.
-	if idx := strings.LastIndex(k, ":"); idx > 0 && idx < len(k)-1 {
-		portPart := k[idx+1:]
-		if isNumeric(portPart) {
-			p, err := strconv.Atoi(portPart)
-			if err != nil {
-				return StaticSiteSpec{}, true, fmt.Errorf("invalid static site port %q: %w", portPart, err)
-			}
-			if p <= 0 || p > 65535 {
-				return StaticSiteSpec{}, true, fmt.Errorf("invalid static site port %d", p)
-			}
-			dir := strings.TrimSpace(k[:idx])
-			if dir == "" {
-				return StaticSiteSpec{}, true, fmt.Errorf("invalid static site path: empty")
-			}
-			return StaticSiteSpec{Dir: dir, Port: p, HasPort: true}, true, nil
-		}
-	}
-
-	return StaticSiteSpec{Dir: k, HasPort: false}, true, nil
+	// Colons are now part of the directory path - no port parsing
+	return StaticSiteSpec{Dir: k}, true, nil
 }
 
 func normalizeRoutePath(p string) string {
@@ -210,18 +207,28 @@ func normalizeRoutePath(p string) string {
 // - "192.168.31.6:1234/api" -> Upstream{Scheme: "http", Host: "192.168.31.6", Port: "1234", Path: "/api"}
 // - "[::1]:9000" -> Upstream{Scheme: "http", Host: "::1", Port: "9000", Path: ""} (IPv6 format)
 // - "example-server.local:8080" -> Upstream{Scheme: "http", Host: "example-server.local", Port: "8080", Path: ""}
-// - "[https]192.168.50.2:1234" -> Upstream{Scheme: "https", Host: "192.168.50.2", Port: "1234", Path: ""}
-// - "[https]www.baidu.com" -> Upstream{Scheme: "https", Host: "www.baidu.com", Port: "443", Path: ""}
+// - "<https>192.168.50.2:1234" -> Upstream{Scheme: "https", Host: "192.168.50.2", Port: "1234", Path: ""}
+// - "<https>www.baidu.com" -> Upstream{Scheme: "https", Host: "www.baidu.com", Port: "443", Path: ""}
 // - "www.example.com" -> Upstream{Scheme: "http", Host: "www.example.com", Port: "80", Path: ""}
 func ParseUpstream(key string) Upstream {
 	// Remove trailing colon if present (for YAML keys like "192.168.31.6:1234:")
 	key = strings.TrimSuffix(key, ":")
 
-	// Check for [https] prefix
+	// Check for protocol prefix
+	// Format: <https>, <http>, <tcp>, <udp>
+	protocol := ProtocolHTTP
+	if strings.HasPrefix(key, "<") {
+		closeIdx := strings.Index(key, ">")
+		if closeIdx > 0 {
+			protoStr := strings.ToLower(key[1:closeIdx])
+			protocol = Protocol(protoStr)
+			key = strings.TrimSpace(key[closeIdx+1:])
+		}
+	}
+
 	scheme := "http"
-	if strings.HasPrefix(key, "[https]") {
+	if protocol == ProtocolHTTPS {
 		scheme = "https"
-		key = strings.TrimPrefix(key, "[https]")
 	}
 
 	// Check for path suffix (e.g., "/api")
@@ -236,10 +243,11 @@ func ParseUpstream(key string) Upstream {
 		closeBracket := strings.Index(key, "]")
 		if closeBracket > 0 && closeBracket < len(key)-1 && key[closeBracket+1] == ':' {
 			return Upstream{
-				Scheme: scheme,
-				Host:   key[1:closeBracket],
-				Port:   key[closeBracket+2:],
-				Path:   path,
+				Scheme:   scheme,
+				Protocol: protocol,
+				Host:     key[1:closeBracket],
+				Port:     key[closeBracket+2:],
+				Path:     path,
 			}
 		}
 	}
@@ -258,39 +266,43 @@ func ParseUpstream(key string) Upstream {
 			if strings.Count(key, ":") > 1 {
 				// This is likely malformed - default to treating as plain port
 				return Upstream{
-					Scheme: scheme,
-					Host:   "127.0.0.1",
-					Port:   key,
-					Path:   path,
+					Scheme:   scheme,
+					Protocol: protocol,
+					Host:     "127.0.0.1",
+					Port:     key,
+					Path:     path,
 				}
 			}
 			// Single colon at start (:8080) - treat as plain port
 			if host == "" {
 				return Upstream{
-					Scheme: scheme,
-					Host:   "127.0.0.1",
-					Port:   port,
-					Path:   path,
+					Scheme:   scheme,
+					Protocol: protocol,
+					Host:     "127.0.0.1",
+					Port:     port,
+					Path:     path,
 				}
 			}
 		}
 
 		// Valid host:port format (could be IP or hostname)
 		return Upstream{
-			Scheme: scheme,
-			Host:   host,
-			Port:   port,
-			Path:   path,
+			Scheme:   scheme,
+			Protocol: protocol,
+			Host:     host,
+			Port:     port,
+			Path:     path,
 		}
 	}
 
 	// Check if it's a pure number (port only)
 	if isNumeric(key) {
 		return Upstream{
-			Scheme: scheme,
-			Host:   "127.0.0.1",
-			Port:   key,
-			Path:   path,
+			Scheme:   scheme,
+			Protocol: protocol,
+			Host:     "127.0.0.1",
+			Port:     key,
+			Path:     path,
 		}
 	}
 
@@ -300,10 +312,11 @@ func ParseUpstream(key string) Upstream {
 		defaultPort = "443"
 	}
 	return Upstream{
-		Scheme: scheme,
-		Host:   key,
-		Port:   defaultPort,
-		Path:   path,
+		Scheme:   scheme,
+		Protocol: protocol,
+		Host:     key,
+		Port:     defaultPort,
+		Path:     path,
 	}
 }
 
@@ -314,6 +327,86 @@ func isNumeric(s string) bool {
 		}
 	}
 	return len(s) > 0
+}
+
+// ParseListenKey parses a listen key which can be:
+// - "1234" -> ListenConfig{Protocol: http, Host: "", Port: "1234"} (HTTP, listen on all interfaces)
+// - "192.168.50.1:22" -> ListenConfig{Protocol: http, Host: "192.168.50.1", Port: "22"} (HTTP, listen on specific IP)
+// - "<http>1234" -> ListenConfig{Protocol: http, Host: "", Port: "1234"} (explicit HTTP)
+// - "<https>443" -> ListenConfig{Protocol: https, Host: "", Port: "443"} (HTTPS)
+// - "<tcp>9122" -> ListenConfig{Protocol: tcp, Host: "", Port: "9122"} (TCP)
+// - "<tcp>192.168.50.1:22" -> ListenConfig{Protocol: tcp, Host: "192.168.50.1", Port: "22"} (TCP on specific IP)
+// - "<udp>9123" -> ListenConfig{Protocol: udp, Host: "", Port: "9123"} (UDP)
+func ParseListenKey(key string) ListenConfig {
+	// Remove trailing colon if present (for YAML keys)
+	key = strings.TrimSuffix(key, ":")
+
+	// Default protocol is HTTP
+	protocol := ProtocolHTTP
+
+	// Check for protocol prefix <protocol>
+	if strings.HasPrefix(key, "<") {
+		closeIdx := strings.Index(key, ">")
+		if closeIdx > 0 {
+			protoStr := strings.ToLower(key[1:closeIdx])
+			protocol = Protocol(protoStr)
+			key = strings.TrimSpace(key[closeIdx+1:])
+		}
+	}
+
+	// Check for host:port format
+	if strings.Contains(key, ":") {
+		lastColon := strings.LastIndex(key, ":")
+		host := key[:lastColon]
+		port := key[lastColon+1:]
+
+		// Handle IPv6 format [host]:port
+		if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+			host = host[1 : len(host)-1]
+		}
+
+		return ListenConfig{
+			Protocol: protocol,
+			Host:     host,
+			Port:     port,
+		}
+	}
+
+	// Just a port number
+	return ListenConfig{
+		Protocol: protocol,
+		Host:     "",
+		Port:     key,
+	}
+}
+
+// IsStaticSiteKey returns true if the key appears to be a static site mapping
+// (starts with '.' or '/', or uses the [dir]/route bracket syntax with a static dir)
+func IsStaticSiteKey(key string) bool {
+	k := strings.TrimSpace(key)
+
+	// Check and ignore <protocol> prefix
+	if strings.HasPrefix(k, "<") {
+		closeIdx := strings.Index(k, ">")
+		if closeIdx > 0 {
+			k = strings.TrimSpace(k[closeIdx+1:])
+		}
+	}
+
+	// Bracket syntax: [DIR]/route - only if DIR starts with '.' or '/'
+	if strings.HasPrefix(k, "[") {
+		closeIdx := strings.Index(k, "]")
+		if closeIdx > 0 {
+			inside := strings.TrimSpace(k[1:closeIdx])
+			if strings.HasPrefix(inside, ".") || strings.HasPrefix(inside, "/") {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Simple path syntax
+	return strings.HasPrefix(k, ".") || strings.HasPrefix(k, "/")
 }
 
 func Load(configDir string) (*Config, error) {

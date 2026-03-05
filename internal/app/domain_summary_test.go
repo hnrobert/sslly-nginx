@@ -52,7 +52,7 @@ func TestClassifyDomains_SuccessMissingExpired(t *testing.T) {
 			"expired.de",
 			"abc.az",
 		},
-		"[https][::1]:9000/api": {"abc.de/api"},
+		"<https>[::1]:9000/api": {"abc.de/api"},
 	}}
 
 	active := map[string]ssl.Certificate{

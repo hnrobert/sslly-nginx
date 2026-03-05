@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go test ./internal/config/... -v)",
+      "Bash(go test ./...)",
+      "Bash(go build ./...)",
+      "Bash(go test ./internal/app/... -v)",
+      "Bash(go test ./internal/nginx/... -v -run TestGenerateConfig_StaticSites)",
+      "Bash(go test ./internal/nginx/... -v -run TestGenerateConfig_StaticSitesWithProxy)",
+      "Bash(go test ./... -v)",
+      "Bash(go build -o /tmp/sslly-nginx ./cmd/sslly-nginx)",
+      "Bash(go test -run TestGenerateConfig_StaticSites ./internal/nginx/... -v)",
+      "Bash(go test ./internal/app/... -v -run TestClassifyDomains_SuccessMissingExpired)"
+    ]
+  }
+}

@@ -22,9 +22,11 @@ A smart Nginx SSL reverse proxy manager that automatically configures SSL certif
 
 - [x] HTTP and HTTPS proxying
 - [x] Automatic HTTP → HTTPS redirection for domains with valid certificates
+- [x] TCP and UDP stream forwarding
 - [x] CORS configuration (optional)
 - [x] Custom log levels and formats (optional)
 - [x] WebSocket support
+- [x] Static site hosting
 
 ## How It Works
 
@@ -43,6 +45,7 @@ For a quick start & deployment guide, see [docs/QUICKSTART.md](docs/QUICKSTART.m
 ## Documentation
 
 - [Quick Start Guide](docs/QUICKSTART.md) - Get started with installation and deployment
+- [Configuration Reference](docs/CONFIG_REFERENCE.md) - Complete configuration format and rules
 - [CORS Configuration](docs/CORS.md) - Comprehensive CORS setup and best practices
 - [FRP Integration](docs/FRP.md) - Set up FRP for remote access to local services
 
@@ -68,6 +71,21 @@ Configure CORS (Cross-Origin Resource Sharing) settings globally or per-domain.
 For more please check [CORS Configuration](docs/CORS.md) for comprehensive CORS setup guide and best practices examples
 
 #### Basic Port Mapping Formats
+
+**Configuration Key Formats Summary:**
+
+- `port` → Proxies to `127.0.0.1:port` via HTTP (default)
+- `ip:port` → Proxies to `ip:port` via HTTP
+- `hostname:port` → Proxies to `hostname:port` via HTTP
+- `[ipv6]:port` → Proxies to IPv6 address with brackets via HTTP
+- `<https>upstream` → Proxies to upstream via HTTPS (prevents "plain HTTP to HTTPS port" errors)
+  - Example: `<https>192.168.50.2:8443` forwards requests using HTTPS
+- `<tcp>port` → TCP stream forwarding
+  - Example: `<tcp>9122` → `8122` forwards TCP traffic
+- `<udp>port` → UDP stream forwarding
+  - Example: `<udp>9123` → `8123` forwards UDP traffic
+- `upstream/path` → Adds path routing to the upstream
+  - Example: `192.168.50.2:5678/api` proxies `/api` requests to that backend
 
 ##### Format 1: Port Only (Default to localhost)
 
@@ -105,17 +123,17 @@ example-server.local:8080:
   - ipv6.example.com
 ```
 
-##### Format 5: HTTPS Backend (Use `[https]` prefix)
+##### Format 5: HTTPS Backend (Use `<https>` prefix)
 
 ```yaml
 # Proxies to HTTPS backend (prevents "plain HTTP to HTTPS port" errors)
-'[https]192.168.50.2:8443':
+'<https>192.168.50.2:8443':
   - secure-backend.example.com
 ```
 
-**Note:** By default, sslly-nginx forwards requests to upstream servers using HTTP. Use the `[https]` prefix when your upstream server expects HTTPS connections to avoid "400 Bad Request - The plain HTTP request was sent to HTTPS port" errors.
+**Note:** By default, sslly-nginx forwards requests to upstream servers using HTTP. Use the `<https>` prefix when your upstream server expects HTTPS connections to avoid "400 Bad Request - The plain HTTP request was sent to HTTPS port" errors.
 
-#### Advanced: Path-based Routing
+#### Format 6: Path-based Routing
 
 Route different paths of the same domain to different backends:
 
@@ -134,40 +152,72 @@ This generates Nginx configuration with location-based routing:
 - `shared.example.com/api` → `192.168.50.2:5678/api`
 - `shared.example.com/` → `127.0.0.1:9012`
 
-**Configuration Key Formats Summary:**
-
-- `port` → Proxies to `127.0.0.1:port` via HTTP (default)
-- `ip:port` → Proxies to `ip:port` via HTTP
-- `hostname:port` → Proxies to `hostname:port` via HTTP
-- `[ipv6]:port` → Proxies to IPv6 address with brackets via HTTP
-- `[https]upstream` → Proxies to upstream via HTTPS (prevents "plain HTTP to HTTPS port" errors)
-  - Example: `[https]192.168.50.2:8443` forwards requests using HTTPS
-- `upstream/path` → Adds path routing to the upstream
-  - Example: `192.168.50.2:5678/api` proxies `/api` requests to that backend
-
 #### Static Site: Serve a Directory
 
-You can serve a local directory as a static website by using a path key (starts with `.` or `/`) in `configs/proxy.yaml`.
+You can serve a local directory as a static website by using a path key (starts with `.` or `/`) in `configs/proxy.yaml`. The static files are served directly by Nginx using the `root` directive.
+
+**Format 1: Directory with Multiple URL Paths**
 
 ```yaml
-# Auto-assign an available local port starting from 10000
-/app/static:
-  - static.example.com
+# Serve same directory at multiple URL paths
+/app/static/docs:
+  - example.com/api
+  - example.com/guide
+  - example.com/docs
+```
 
-# Or pin a specific local port (if the port is in use, this entry will error and others continue)
-./static:10080:
-  - docs.example.com
+Result: All three paths (`/api`, `/guide`, `/docs`) serve files from `/app/static/docs`
 
-# Route prefix shortcut: serve /home from this directory
+**Format 2: Directory with Route Path (Key-based)**
+
+```yaml
+# Directory dedicated to a specific route
 "[/app/static/site1]/home":
   - yourdomain.com
 ```
 
-Notes:
+Result: `yourdomain.com/home` serves files from `/app/static/site1`
 
-- Default `docker-compose.yml` mounts `./static` to `/app/static`.
-- If you omit the `:PORT` suffix, sslly-nginx will auto-pick a free port starting from `10000` and log it (including in the domain summary destinations).
-- The bracket form `"[DIR]/route"` is a shortcut for writing `yourdomain.com/route` in the domain list.
+**Key Differences:**
+
+| Aspect | Format 1 | Format 2 |
+|--------|---------|---------|
+| Route location | In domain list | In directory key |
+| Flexibility | One dir → multiple paths | One dir → one path |
+| Use case | Same content, multiple entry points | Directory dedicated to route |
+| Example | Docs at `/api`, `/guide`, `/docs` | Home page at `/home` |
+
+**Other Examples:**
+
+```yaml
+# Basic static site at root
+/app/static:
+  - static.example.com
+
+# Directory with colon in path
+"/app/static:v2":
+  - docs.example.com
+
+# With custom port
+/app/static:
+  - docs.example.com:8080
+```
+
+**Features:**
+
+- **Direct Nginx Serving**: Static files are served directly by Nginx for optimal performance
+- **SPA Support**: If the directory contains `index.html`, Nginx automatically enables SPA-style routing with `try_files`
+- **Default Ports**: Uses HTTP (80) / HTTPS (443) by default, or custom ports if specified in the domain
+- **CORS**: Respects global or domain-specific CORS configuration
+
+**Notes:**
+
+- Default `docker-compose.yml` mounts `./static` to `/app/static`
+- The bracket form `"[DIR]/route"` binds route to directory key
+- Colons (`:`) in directory paths are treated as part of the file path, not as port separators
+- Static sites bypass the proxy layer and are served directly by Nginx for better performance
+
+For complete configuration reference, see [Config Reference](docs/CONFIG_REFERENCE.md).
 
 ### SSL Certificate Structure
 
@@ -346,9 +396,11 @@ These settings work well with applications like:
 
    ```yaml
    environment:
-     - SSL_NGINX_HTTP_PORT=9980 # HTTP traffic
-     - SSL_NGINX_HTTPS_PORT=9943 # HTTPS traffic
+     - SSLLY_DEFAULT_HTTP_LISTEN_PORT=9980 # HTTP traffic
+     - SSLLY_DEFAULT_HTTPS_LISTEN_PORT=9943 # HTTPS traffic
    ```
+
+   > **Note:** The legacy environment variables `SSL_NGINX_HTTP_PORT` and `SSL_NGINX_HTTPS_PORT` are also supported for backward compatibility.
 
 2. **Setup FRP Client**: Create `frpc.toml`:
 
@@ -464,8 +516,10 @@ The `docker-compose.yml` is configured with:
 
 ### Environment Variables
 
-- `SSL_NGINX_HTTP_PORT` (default: `80`) — port Nginx listens for HTTP and redirect to HTTPS
-- `SSL_NGINX_HTTPS_PORT` (default: `443`) — port Nginx listens for HTTPS
+- `SSLLY_DEFAULT_HTTP_LISTEN_PORT` (default: `80`) — port Nginx listens for HTTP and redirect to HTTPS
+- `SSLLY_DEFAULT_HTTPS_LISTEN_PORT` (default: `443`) — port Nginx listens for HTTPS
+
+> **Note:** The legacy environment variables `SSL_NGINX_HTTP_PORT` and `SSL_NGINX_HTTPS_PORT` are still supported for backward compatibility but are deprecated.
 
 ### Viewing Logs
 

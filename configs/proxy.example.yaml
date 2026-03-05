@@ -7,11 +7,11 @@
 # 2. ip:port: [domains]           - Proxies to specified ip:port via HTTP
 # 3. hostname:port: [domains]     - Proxies to specified hostname:port via HTTP
 # 4. [ipv6]:port: [domains]       - Proxies to IPv6 address with brackets via HTTP
-# 5. [https]upstream: [domains]   - Proxies to upstream via HTTPS (prevents "plain HTTP to HTTPS port" errors)
-# 6. ./dir or /abs/dir: [domains] - Serves a local directory as a static site (auto-assigns an available port from 10000)
-# 7. ./dir:port: [domains]        - Serves a local directory as a static site on a fixed local port
-# 8. [./dir]/route: [domains]      - Serves a local directory on a specific URL route (auto-assigns port)
-# 9. [./dir:port]/route: [domains] - Serves a local directory on a specific URL route (fixed port)
+# 5. <https>upstream: [domains]   - Proxies to upstream via HTTPS (prevents "plain HTTP to HTTPS port" errors)
+# 6. <tcp>port: [upstream]        - TCP stream forwarding
+# 7. <udp>port: [upstream]        - UDP stream forwarding
+# 8. ./dir or /abs/dir: [domains] - Serves a local directory as a static site
+# 9. [./dir]/route: [domains]     - Serves a local directory on a specific URL route
 
 # Example 1: Proxy to localhost (default)
 1234:
@@ -32,9 +32,9 @@
 # "[2001:db8::1]:3000":
 #   - ipv6.example.com
 
-# Example 5: Proxy to HTTPS backend (use [https] prefix)
+# Example 5: Proxy to HTTPS backend (use <https> prefix)
 # This prevents "400 Bad Request - The plain HTTP request was sent to HTTPS port" errors
-# "[https]192.168.50.2:8443":
+# "<https>192.168.50.2:8443":
 #   - secure-backend.example.com
 
 # Example 6: Shared Domain with different routes
@@ -44,27 +44,61 @@
 # 192.168.50.2:3456/api:
 #   - shared.example.com/api
 
-# Example 7: Static site from a directory (auto port)
+# Example 7: Static site from a directory
 # Notes:
-# - If the key starts with '.' or '/', sslly-nginx treats it as a directory path.
-# - If you don't specify a port, sslly-nginx will pick an available one starting from 10000.
+# - If the key starts with '.' or '/', sslly-nginx serves it as a static site
+# - Static files are served directly by Nginx using the 'root' directive
+# - SPA support is automatically enabled if the directory contains index.html
 # - Default docker-compose mounts ./static -> /app/static
+# - Colons in paths are treated as part of the directory path, not as port separators
 #
 # /app/static:
 #   - static.example.com
 
-# Example 8: Static site from a directory (fixed port)
-# If the port is already in use, sslly-nginx will log an error for this entry and continue loading others.
+# Example 8: Static directory with multiple URL paths (Format 1)
+# This serves the SAME directory at MULTIPLE URL paths
+# Useful when one directory needs to be accessible from different routes
 #
-# ./static:10080:
-#   - docs.example.com
+# /app/static/docs:
+#   - example.com/api
+#   - example.com/guide
+#   - example.com/docs
+#
+# Result: All three paths serve files from /app/static/docs
 
-# Example 9: Static directory with a route prefix
-# This is a shortcut for writing the route in the domain list.
+# Example 9: Static directory with route path (Format 2)
+# The route path is bound to the directory key
+# Different from Format 1 - route is part of the directory specification
 #
 # "[/app/static/site1]/home":
 #   - yourdomain.com
 #
-# Equivalent to:
-# /app/static/site1:
-#   - yourdomain.com/home
+# This is NOT equivalent to Format 1! Differences:
+# - Format 1: Directory mapped to multiple paths (flexible)
+# - Format 2: Directory bound to specific route (explicit)
+#
+# Use Format 1 when: Same directory, different entry points
+# Use Format 2 when: Directory dedicated to one route
+
+# Example 10: Static site with custom port
+# /app/static:
+#   - docs.example.com:8080
+
+# Example 9: TCP stream forwarding
+# Forward TCP traffic from port 9122 to localhost:8122
+# <tcp>9122:
+#   - 8122
+
+# Example 10: TCP forwarding to specific host
+# <tcp>192.168.50.1:22:
+#   - 5022
+
+# Example 11: UDP stream forwarding
+# <udp>9123:
+#   - 8123
+
+# Example 12: TCP on port 443 (requires ssl_preread)
+# When TCP uses port 443, ssl_preread is automatically enabled to distinguish
+# between TLS and plain TCP traffic
+# <tcp>443:
+#   - 192.168.50.1:22

@@ -172,68 +172,12 @@ func TestParseUpstream(t *testing.T) {
 			wantPath:   "/api/v1",
 		},
 		{
-			name:       "HTTPS scheme with IP:port",
-			input:      "[https]192.168.50.2:8443",
-			wantScheme: "https",
-			wantHost:   "192.168.50.2",
-			wantPort:   "8443",
-			wantPath:   "",
-		},
-		{
-			name:       "HTTPS scheme with plain port",
-			input:      "[https]8443",
-			wantScheme: "https",
-			wantHost:   "127.0.0.1",
-			wantPort:   "8443",
-			wantPath:   "",
-		},
-		{
-			name:       "HTTPS scheme with hostname",
-			input:      "[https]backend.local:8443",
-			wantScheme: "https",
-			wantHost:   "backend.local",
-			wantPort:   "8443",
-			wantPath:   "",
-		},
-		{
-			name:       "HTTPS scheme with path",
-			input:      "[https]192.168.50.2:8443/api",
-			wantScheme: "https",
-			wantHost:   "192.168.50.2",
-			wantPort:   "8443",
-			wantPath:   "/api",
-		},
-		{
-			name:       "HTTPS scheme with IPv6",
-			input:      "[https][2001:db8::1]:8443",
-			wantScheme: "https",
-			wantHost:   "2001:db8::1",
-			wantPort:   "8443",
-			wantPath:   "",
-		},
-		{
 			name:       "Domain name without port (http)",
 			input:      "www.example.com",
 			wantScheme: "http",
 			wantHost:   "www.example.com",
 			wantPort:   "80",
 			wantPath:   "",
-		},
-		{
-			name:       "Domain name without port (https)",
-			input:      "[https]www.baidu.com",
-			wantScheme: "https",
-			wantHost:   "www.baidu.com",
-			wantPort:   "443",
-			wantPath:   "",
-		},
-		{
-			name:       "Domain name with path (https)",
-			input:      "[https]api.example.com/v1",
-			wantScheme: "https",
-			wantHost:   "api.example.com",
-			wantPort:   "443",
-			wantPath:   "/v1",
 		},
 	}
 
@@ -606,5 +550,308 @@ func TestLoad_LoadsLogsConfig(t *testing.T) {
 	}
 	if cfg.Log.Nginx.StderrShow != "warn" {
 		t.Fatalf("expected nginx stderr_show warn, got %q", cfg.Log.Nginx.StderrShow)
+	}
+}
+
+func TestParseUpstream_NewHttpsFormat(t *testing.T) {
+	tests := []struct {
+		name         string
+		input        string
+		wantScheme   string
+		wantProtocol Protocol
+		wantHost     string
+		wantPort     string
+		wantPath     string
+	}{
+		{
+			name:         "New HTTPS format <https>ip:port",
+			input:        "<https>192.168.50.2:8443",
+			wantScheme:   "https",
+			wantProtocol: ProtocolHTTPS,
+			wantHost:     "192.168.50.2",
+			wantPort:     "8443",
+			wantPath:     "",
+		},
+		{
+			name:         "New HTTPS format <https>hostname",
+			input:        "<https>backend.example.com",
+			wantScheme:   "https",
+			wantProtocol: ProtocolHTTPS,
+			wantHost:     "backend.example.com",
+			wantPort:     "443",
+			wantPath:     "",
+		},
+		{
+			name:         "New HTTPS format with path",
+			input:        "<https>api.example.com/v1",
+			wantScheme:   "https",
+			wantProtocol: ProtocolHTTPS,
+			wantHost:     "api.example.com",
+			wantPort:     "443",
+			wantPath:     "/v1",
+		},
+		{
+			name:         "New HTTP format explicit",
+			input:        "<http>192.168.50.2:8080",
+			wantScheme:   "http",
+			wantProtocol: ProtocolHTTP,
+			wantHost:     "192.168.50.2",
+			wantPort:     "8080",
+			wantPath:     "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			upstream := ParseUpstream(tt.input)
+			if upstream.Scheme != tt.wantScheme {
+				t.Errorf("ParseUpstream(%q).Scheme = %q, want %q", tt.input, upstream.Scheme, tt.wantScheme)
+			}
+			if upstream.Protocol != tt.wantProtocol {
+				t.Errorf("ParseUpstream(%q).Protocol = %q, want %q", tt.input, upstream.Protocol, tt.wantProtocol)
+			}
+			if upstream.Host != tt.wantHost {
+				t.Errorf("ParseUpstream(%q).Host = %q, want %q", tt.input, upstream.Host, tt.wantHost)
+			}
+			if upstream.Port != tt.wantPort {
+				t.Errorf("ParseUpstream(%q).Port = %q, want %q", tt.input, upstream.Port, tt.wantPort)
+			}
+			if upstream.Path != tt.wantPath {
+				t.Errorf("ParseUpstream(%q).Path = %q, want %q", tt.input, upstream.Path, tt.wantPath)
+			}
+		})
+	}
+}
+
+func TestParseListenKey(t *testing.T) {
+	tests := []struct {
+		name         string
+		input        string
+		wantProtocol Protocol
+		wantHost     string
+		wantPort     string
+	}{
+		{
+			name:         "Plain port (HTTP default)",
+			input:        "1234",
+			wantProtocol: ProtocolHTTP,
+			wantHost:     "",
+			wantPort:     "1234",
+		},
+		{
+			name:         "IP:port format (HTTP default)",
+			input:        "192.168.50.1:22",
+			wantProtocol: ProtocolHTTP,
+			wantHost:     "192.168.50.1",
+			wantPort:     "22",
+		},
+		{
+			name:         "Explicit HTTP",
+			input:        "<http>8080",
+			wantProtocol: ProtocolHTTP,
+			wantHost:     "",
+			wantPort:     "8080",
+		},
+		{
+			name:         "Explicit HTTPS",
+			input:        "<https>443",
+			wantProtocol: ProtocolHTTPS,
+			wantHost:     "",
+			wantPort:     "443",
+		},
+		{
+			name:         "TCP stream",
+			input:        "<tcp>9122",
+			wantProtocol: ProtocolTCP,
+			wantHost:     "",
+			wantPort:     "9122",
+		},
+		{
+			name:         "TCP with host",
+			input:        "<tcp>192.168.50.1:22",
+			wantProtocol: ProtocolTCP,
+			wantHost:     "192.168.50.1",
+			wantPort:     "22",
+		},
+		{
+			name:         "UDP stream",
+			input:        "<udp>9123",
+			wantProtocol: ProtocolUDP,
+			wantHost:     "",
+			wantPort:     "9123",
+		},
+		{
+			name:         "Port with trailing colon",
+			input:        "1234:",
+			wantProtocol: ProtocolHTTP,
+			wantHost:     "",
+			wantPort:     "1234",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			listen := ParseListenKey(tt.input)
+			if listen.Protocol != tt.wantProtocol {
+				t.Errorf("ParseListenKey(%q).Protocol = %q, want %q", tt.input, listen.Protocol, tt.wantProtocol)
+			}
+			if listen.Host != tt.wantHost {
+				t.Errorf("ParseListenKey(%q).Host = %q, want %q", tt.input, listen.Host, tt.wantHost)
+			}
+			if listen.Port != tt.wantPort {
+				t.Errorf("ParseListenKey(%q).Port = %q, want %q", tt.input, listen.Port, tt.wantPort)
+			}
+		})
+	}
+}
+
+func TestProtocolMethods(t *testing.T) {
+	if !ProtocolHTTP.IsHTTP() {
+		t.Error("ProtocolHTTP.IsHTTP() should return true")
+	}
+	if !ProtocolHTTPS.IsHTTP() {
+		t.Error("ProtocolHTTPS.IsHTTP() should return true")
+	}
+	if ProtocolTCP.IsHTTP() {
+		t.Error("ProtocolTCP.IsHTTP() should return false")
+	}
+	if ProtocolUDP.IsHTTP() {
+		t.Error("ProtocolUDP.IsHTTP() should return false")
+	}
+
+	if ProtocolHTTP.IsStream() {
+		t.Error("ProtocolHTTP.IsStream() should return false")
+	}
+	if ProtocolHTTPS.IsStream() {
+		t.Error("ProtocolHTTPS.IsStream() should return false")
+	}
+	if !ProtocolTCP.IsStream() {
+		t.Error("ProtocolTCP.IsStream() should return true")
+	}
+	if !ProtocolUDP.IsStream() {
+		t.Error("ProtocolUDP.IsStream() should return true")
+	}
+}
+
+func TestParseStaticSiteKey_NewRules(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		wantDir    string
+		wantRoute  string
+		wantOK     bool
+		wantErr    bool
+	}{
+		{
+			name:      "Simple directory path",
+			input:     "/app/static",
+			wantDir:   "/app/static",
+			wantRoute: "",
+			wantOK:    true,
+			wantErr:   false,
+		},
+		{
+			name:      "Directory with colon in path (treated as path)",
+			input:     "/app/static:v2",
+			wantDir:   "/app/static:v2",
+			wantRoute: "",
+			wantOK:    true,
+			wantErr:   false,
+		},
+		{
+			name:      "Relative path",
+			input:     "./static",
+			wantDir:   "./static",
+			wantRoute: "",
+			wantOK:    true,
+			wantErr:   false,
+		},
+		{
+			name:      "Bracket syntax with route",
+			input:     "[/app/static/site1]/home",
+			wantDir:   "/app/static/site1",
+			wantRoute: "/home",
+			wantOK:    true,
+			wantErr:   false,
+		},
+		{
+			name:      "Bracket syntax with colon in path",
+			input:     "[/app/static:v2]/docs",
+			wantDir:   "/app/static:v2",
+			wantRoute: "/docs",
+			wantOK:    true,
+			wantErr:   false,
+		},
+		{
+			name:      "Protocol prefix is stripped",
+			input:     "<http>./static",
+			wantDir:   "./static",
+			wantRoute: "",
+			wantOK:    true,
+			wantErr:   false,
+		},
+		{
+			name:      "Non-static key (plain port)",
+			input:     "1234",
+			wantDir:   "",
+			wantRoute: "",
+			wantOK:    false,
+			wantErr:   false,
+		},
+		{
+			name:      "Non-static key (ip:port)",
+			input:     "192.168.50.1:22",
+			wantDir:   "",
+			wantRoute: "",
+			wantOK:    false,
+			wantErr:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec, ok, err := ParseStaticSiteKey(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParseStaticSiteKey(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+				return
+			}
+			if ok != tt.wantOK {
+				t.Errorf("ParseStaticSiteKey(%q) ok = %v, want %v", tt.input, ok, tt.wantOK)
+				return
+			}
+			if ok {
+				if spec.Dir != tt.wantDir {
+					t.Errorf("ParseStaticSiteKey(%q).Dir = %q, want %q", tt.input, spec.Dir, tt.wantDir)
+				}
+				if spec.RoutePath != tt.wantRoute {
+					t.Errorf("ParseStaticSiteKey(%q).RoutePath = %q, want %q", tt.input, spec.RoutePath, tt.wantRoute)
+				}
+			}
+		})
+	}
+}
+
+func TestIsStaticSiteKey(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"/app/static", true},
+		{"./static", true},
+		{"[/app/static]/route", true},
+		{"[./static]/route", true},
+		{"<http>./static", true}, // protocol prefix is stripped before checking
+		{"1234", false},
+		{"192.168.50.1:22", false},
+		{"<tcp>9122", false},
+		{"[https]9143", false}, // Not a static site because inside doesn't start with '.' or '/'
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := IsStaticSiteKey(tt.input); got != tt.want {
+				t.Errorf("IsStaticSiteKey(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
 	}
 }
