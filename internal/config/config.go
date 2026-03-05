@@ -331,12 +331,13 @@ func isNumeric(s string) bool {
 
 // ParseListenKey parses a listen key which can be:
 // - "1234" -> ListenConfig{Protocol: http, Host: "", Port: "1234"} (HTTP, listen on all interfaces)
-// - "192.168.50.1:22" -> ListenConfig{Protocol: http, Host: "192.168.50.1", Port: "22"} (HTTP, listen on specific IP)
+// - "server_name|1234" -> ListenConfig{Protocol: http, Host: "server_name", Port: "1234"}
 // - "<http>1234" -> ListenConfig{Protocol: http, Host: "", Port: "1234"} (explicit HTTP)
 // - "<https>443" -> ListenConfig{Protocol: https, Host: "", Port: "443"} (HTTPS)
 // - "<tcp>9122" -> ListenConfig{Protocol: tcp, Host: "", Port: "9122"} (TCP)
-// - "<tcp>192.168.50.1:22" -> ListenConfig{Protocol: tcp, Host: "192.168.50.1", Port: "22"} (TCP on specific IP)
+// - "<tcp>192.168.50.1|22" -> ListenConfig{Protocol: tcp, Host: "192.168.50.1", Port: "22"} (TCP on specific IP)
 // - "<udp>9123" -> ListenConfig{Protocol: udp, Host: "", Port: "9123"} (UDP)
+// The | separator is used to split server_name and port (colon is used for IPv6 addresses)
 func ParseListenKey(key string) ListenConfig {
 	// Remove trailing colon if present (for YAML keys)
 	key = strings.TrimSuffix(key, ":")
@@ -354,13 +355,13 @@ func ParseListenKey(key string) ListenConfig {
 		}
 	}
 
-	// Check for host:port format
-	if strings.Contains(key, ":") {
-		lastColon := strings.LastIndex(key, ":")
-		host := key[:lastColon]
-		port := key[lastColon+1:]
+	// Check for server_name|port format
+	if strings.Contains(key, "|") {
+		pipeIdx := strings.Index(key, "|")
+		host := key[:pipeIdx]
+		port := key[pipeIdx+1:]
 
-		// Handle IPv6 format [host]:port
+		// Handle IPv6 format [host]|port
 		if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
 			host = host[1 : len(host)-1]
 		}
@@ -372,7 +373,7 @@ func ParseListenKey(key string) ListenConfig {
 		}
 	}
 
-	// Just a port number
+	// Just a port number (no | separator)
 	return ListenConfig{
 		Protocol: protocol,
 		Host:     "",

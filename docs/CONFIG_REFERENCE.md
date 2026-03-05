@@ -13,6 +13,7 @@ upstream_key:
 ```
 
 Each listener key in the list can be:
+
 - **Domain**: `example.com`, `api.example.com`
 - **Upstream**: `192.168.1.1:8080` (only if manually specified)
 - **Listener**: `8080` (shorthand without `:`)
@@ -24,7 +25,7 @@ There are three types of keys:
 | Key Type | Format | Example | Description |
 |----------|-------|---------|-------------|
 | **Upstream Key** (left side) | `address` | `192.168.1.1:8080` | Defines where traffic goes |
-| **Listener Key** (in list) | `domain[:port][/path]` | `example.com:8080/api` | Defines where traffic is received |
+| **Listener Key** (in list) | `domain[/path]` or `host\|port` | `example.com/api` or `192.168.1.1\|8080` | Defines where traffic is received |
 | **Static Site Key** (left side) | `/directory` | `/app/static` | Defines static file serving |
 
 ### Upstream Key (Left Side)
@@ -106,7 +107,7 @@ Adds path-based routing to the upstream.
 
 The domain list specifies which domains route to the upstream.
 
-### Basic Format
+### Domain List Basic Format
 
 ```yaml
 - domain.com
@@ -236,8 +237,8 @@ This serves files at `example.com/home` from `/app/static`.
 <udp>9123:
   - 8123
 
-# TCP to specific host
-<tcp>192.168.1.1:22:
+# TCP to specific host (use | to separate host and port)
+<tcp>192.168.1.1|22:
   - 5022
 ```
 

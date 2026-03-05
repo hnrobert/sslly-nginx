@@ -639,8 +639,8 @@ func TestParseListenKey(t *testing.T) {
 			wantPort:     "1234",
 		},
 		{
-			name:         "IP:port format (HTTP default)",
-			input:        "192.168.50.1:22",
+			name:         "IP|port format (HTTP default)",
+			input:        "192.168.50.1|22",
 			wantProtocol: ProtocolHTTP,
 			wantHost:     "192.168.50.1",
 			wantPort:     "22",
@@ -667,8 +667,8 @@ func TestParseListenKey(t *testing.T) {
 			wantPort:     "9122",
 		},
 		{
-			name:         "TCP with host",
-			input:        "<tcp>192.168.50.1:22",
+			name:         "TCP|host format",
+			input:        "<tcp>192.168.50.1|22",
 			wantProtocol: ProtocolTCP,
 			wantHost:     "192.168.50.1",
 			wantPort:     "22",

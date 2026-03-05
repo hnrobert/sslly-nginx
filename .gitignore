@@ -52,3 +52,5 @@ bin/
 !ssl/README.md
 
 .venv
+
+settings.local.json
