@@ -735,12 +735,12 @@ func TestProtocolMethods(t *testing.T) {
 
 func TestParseStaticSiteKey_NewRules(t *testing.T) {
 	tests := []struct {
-		name       string
-		input      string
-		wantDir    string
-		wantRoute  string
-		wantOK     bool
-		wantErr    bool
+		name      string
+		input     string
+		wantDir   string
+		wantRoute string
+		wantOK    bool
+		wantErr   bool
 	}{
 		{
 			name:      "Simple directory path",
@@ -851,6 +851,204 @@ func TestIsStaticSiteKey(t *testing.T) {
 		t.Run(tt.input, func(t *testing.T) {
 			if got := IsStaticSiteKey(tt.input); got != tt.want {
 				t.Errorf("IsStaticSiteKey(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestProtocolIsStatic(t *testing.T) {
+	if !ProtocolStatic.IsStatic() {
+		t.Error("ProtocolStatic.IsStatic() should return true")
+	}
+	if ProtocolHTTP.IsStatic() {
+		t.Error("ProtocolHTTP.IsStatic() should return false")
+	}
+	if ProtocolTCP.IsStatic() {
+		t.Error("ProtocolTCP.IsStatic() should return false")
+	}
+}
+
+func TestValidateMapping(t *testing.T) {
+	tests := []struct {
+		name         string
+		upstreamKey  string
+		listenerKey  string
+		hasCert      bool
+		wantProtocol Protocol
+		wantHost     string
+		wantPort     string
+		wantErrors   int
+		wantWarnings int
+	}{
+		// HTTP upstream without certificate - smart mode should use HTTP
+		{
+			name:         "HTTP upstream without certificate",
+			upstreamKey:  "1234",
+			listenerKey:  "example.com",
+			hasCert:      false,
+			wantProtocol: ProtocolHTTP,
+			wantHost:     "",
+			wantPort:     "example.com",
+			wantErrors:   0,
+			wantWarnings: 0,
+		},
+		// HTTP upstream with certificate - smart mode should use HTTPS
+		{
+			name:         "HTTP upstream with certificate",
+			upstreamKey:  "1234",
+			listenerKey:  "example.com",
+			hasCert:      true,
+			wantProtocol: ProtocolHTTPS,
+			wantHost:     "",
+			wantPort:     "example.com",
+			wantErrors:   0,
+			wantWarnings: 0,
+		},
+		// HTTPS upstream without certificate - smart mode should use HTTPS
+		{
+			name:         "HTTPS upstream without certificate",
+			upstreamKey:  "<https>backend.example.com",
+			listenerKey:  "example.com",
+			hasCert:      false,
+			wantProtocol: ProtocolHTTPS,
+			wantHost:     "",
+			wantPort:     "example.com",
+			wantErrors:   0,
+			wantWarnings: 0,
+		},
+		// Static upstream with certificate - smart mode should use HTTPS
+		{
+			name:         "Static upstream with certificate",
+			upstreamKey:  "/app/static",
+			listenerKey:  "example.com",
+			hasCert:      true,
+			wantProtocol: ProtocolHTTPS,
+			wantHost:     "",
+			wantPort:     "example.com",
+			wantErrors:   0,
+			wantWarnings: 0,
+		},
+		// TCP upstream - smart mode should use TCP
+		{
+			name:         "TCP upstream smart mode",
+			upstreamKey:  "<tcp>9122",
+			listenerKey:  "8122",
+			hasCert:      false,
+			wantProtocol: ProtocolTCP,
+			wantHost:     "",
+			wantPort:     "8122",
+			wantErrors:   0,
+			wantWarnings: 0,
+		},
+		// TCP upstream with explicit TCP listener - warning for redundancy
+		{
+			name:         "TCP upstream with explicit TCP listener (redundant)",
+			upstreamKey:  "<tcp>9122",
+			listenerKey:  "<tcp>8122",
+			hasCert:      false,
+			wantProtocol: ProtocolTCP,
+			wantHost:     "",
+			wantPort:     "8122",
+			wantErrors:   0,
+			wantWarnings: 1,
+		},
+		// TCP upstream with UDP listener - error
+		{
+			name:         "TCP upstream with UDP listener (error)",
+			upstreamKey:  "<tcp>9122",
+			listenerKey:  "<udp>8122",
+			hasCert:      false,
+			wantProtocol: ProtocolUDP,
+			wantHost:     "",
+			wantPort:     "8122",
+			wantErrors:   1,
+			wantWarnings: 0,
+		},
+		// HTTP upstream with TCP listener - error
+		{
+			name:         "HTTP upstream with TCP listener (error)",
+			upstreamKey:  "1234",
+			listenerKey:  "<tcp>example.com",
+			hasCert:      false,
+			wantProtocol: ProtocolTCP,
+			wantHost:     "",
+			wantPort:     "example.com",
+			wantErrors:   1,
+			wantWarnings: 0,
+		},
+		// Static listen protocol - error
+		{
+			name:         "Static listen protocol (error)",
+			upstreamKey:  "1234",
+			listenerKey:  "<static>example.com",
+			hasCert:      false,
+			wantProtocol: ProtocolStatic,
+			wantHost:     "",
+			wantPort:     "example.com",
+			wantErrors:   1,
+			wantWarnings: 0,
+		},
+		// Explicit HTTP listener with HTTP upstream - allowed
+		{
+			name:         "Explicit HTTP listener with HTTP upstream",
+			upstreamKey:  "1234",
+			listenerKey:  "<http>example.com",
+			hasCert:      false,
+			wantProtocol: ProtocolHTTP,
+			wantHost:     "",
+			wantPort:     "example.com",
+			wantErrors:   0,
+			wantWarnings: 0,
+		},
+		// Explicit HTTPS listener with HTTP upstream - allowed
+		{
+			name:         "Explicit HTTPS listener with HTTP upstream",
+			upstreamKey:  "1234",
+			listenerKey:  "<https>example.com",
+			hasCert:      false,
+			wantProtocol: ProtocolHTTPS,
+			wantHost:     "",
+			wantPort:     "example.com",
+			wantErrors:   0,
+			wantWarnings: 0,
+		},
+		// Listener with host
+		{
+			name:         "Listener with host",
+			upstreamKey:  "1234",
+			listenerKey:  "192.168.1.1|8080",
+			hasCert:      false,
+			wantProtocol: ProtocolHTTP,
+			wantHost:     "192.168.1.1",
+			wantPort:     "8080",
+			wantErrors:   0,
+			wantWarnings: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			listenConfig, errors, warnings := ValidateMapping(tt.upstreamKey, tt.listenerKey, tt.hasCert)
+			if len(errors) != tt.wantErrors {
+				t.Errorf("ValidateMapping(%q, %q, %v) returned %d errors, want %d", tt.upstreamKey, tt.listenerKey, tt.hasCert, len(errors), tt.wantErrors)
+				for i, err := range errors {
+					t.Logf("  Error %d: %v", i, err)
+				}
+			}
+			if len(warnings) != tt.wantWarnings {
+				t.Errorf("ValidateMapping(%q, %q, %v) returned %d warnings, want %d", tt.upstreamKey, tt.listenerKey, tt.hasCert, len(warnings), tt.wantWarnings)
+				for i, warn := range warnings {
+					t.Logf("  Warning %d: %v", i, warn)
+				}
+			}
+			if listenConfig.Protocol != tt.wantProtocol {
+				t.Errorf("ValidateMapping(%q, %q, %v).Protocol = %q, want %q", tt.upstreamKey, tt.listenerKey, tt.hasCert, listenConfig.Protocol, tt.wantProtocol)
+			}
+			if listenConfig.Host != tt.wantHost {
+				t.Errorf("ValidateMapping(%q, %q, %v).Host = %q, want %q", tt.upstreamKey, tt.listenerKey, tt.hasCert, listenConfig.Host, tt.wantHost)
+			}
+			if listenConfig.Port != tt.wantPort {
+				t.Errorf("ValidateMapping(%q, %q, %v).Port = %q, want %q", tt.upstreamKey, tt.listenerKey, tt.hasCert, listenConfig.Port, tt.wantPort)
 			}
 		})
 	}

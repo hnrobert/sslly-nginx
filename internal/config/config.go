@@ -29,10 +29,11 @@ const (
 type Protocol string
 
 const (
-	ProtocolHTTP  Protocol = "http"
-	ProtocolHTTPS Protocol = "https"
-	ProtocolTCP   Protocol = "tcp"
-	ProtocolUDP   Protocol = "udp"
+	ProtocolHTTP   Protocol = "http"
+	ProtocolHTTPS  Protocol = "https"
+	ProtocolTCP    Protocol = "tcp"
+	ProtocolUDP    Protocol = "udp"
+	ProtocolStatic Protocol = "static"
 )
 
 func exampleDir() string {
@@ -73,7 +74,7 @@ type LogConfig struct {
 // Upstream represents a backend server configuration
 type Upstream struct {
 	Scheme   string   // Protocol scheme: "http" or "https" (default: "http") - legacy field, use Protocol for new code
-	Protocol Protocol // Protocol type: http, https, tcp, udp
+	Protocol Protocol // Protocol type: http, https, tcp, udp, static
 	Host     string   // IP address or hostname (default: 127.0.0.1)
 	Port     string   // Port number
 	Path     string   // Optional path prefix for routing (HTTP/HTTPS only)
@@ -94,6 +95,11 @@ func (p Protocol) IsHTTP() bool {
 // IsStream returns true if the protocol is TCP or UDP (stream layer)
 func (p Protocol) IsStream() bool {
 	return p == ProtocolTCP || p == ProtocolUDP
+}
+
+// IsStatic returns true if the protocol is static (file serving)
+func (p Protocol) IsStatic() bool {
+	return p == ProtocolStatic
 }
 
 type Config struct {
@@ -729,4 +735,197 @@ func copyFile(src, dst string) error {
 		return fmt.Errorf("failed to write %s: %w", filepath.Base(dst), err)
 	}
 	return nil
+}
+
+// MappingError represents a validation error for a proxy mapping
+type MappingError struct {
+	Key     string // The upstream_key that has the error
+	Value   string // The listener_key that has the error (if applicable)
+	Message string // Error description
+}
+
+func (e *MappingError) Error() string {
+	if e.Value != "" {
+		return fmt.Sprintf("mapping error for %q -> %q: %s", e.Key, e.Value, e.Message)
+	}
+	return fmt.Sprintf("mapping error for %q: %s", e.Key, e.Message)
+}
+
+// MappingWarning represents a validation warning for a proxy mapping
+type MappingWarning struct {
+	Key     string // The upstream_key that has the warning
+	Value   string // The listener_key that has the warning (if applicable)
+	Message string // Warning description
+}
+
+func (w *MappingWarning) String() string {
+	if w.Value != "" {
+		return fmt.Sprintf("mapping warning for %q -> %q: %s", w.Key, w.Value, w.Message)
+	}
+	return fmt.Sprintf("mapping warning for %q: %s", w.Key, w.Message)
+}
+
+// ValidateMapping validates a single proxy mapping (upstream_key -> listener_key)
+// Returns the effective listen config, any errors, and any warnings.
+//
+// Validation rules:
+// 1. listen_protocol cannot be static
+// 2. If upstream is http/https, listen can only be http or https (or auto-detect)
+// 3. If upstream is tcp/udp, listen should match (warning if same, error if different)
+// 4. Smart mode: if listen_protocol is not specified, it's inferred from upstream
+//    - tcp upstream -> tcp listen
+//    - http/https upstream -> http/https listen based on certificate availability (handled by caller)
+func ValidateMapping(upstreamKey string, listenerKey string, hasCertificate bool) (ListenConfig, []error, []*MappingWarning) {
+	var errors []error
+	var warnings []*MappingWarning
+
+	// Parse upstream
+	upstream := ParseUpstream(upstreamKey)
+
+	// Parse listener (may have explicit protocol or not)
+	listenConfig := ParseListenKey(listenerKey)
+	explicitProtocol := strings.Contains(listenerKey, "<") && strings.Contains(listenerKey, ">")
+
+	// Rule 1: listen_protocol cannot be static
+	if listenConfig.Protocol == ProtocolStatic {
+		errors = append(errors, &MappingError{
+			Key:     upstreamKey,
+			Value:   listenerKey,
+			Message: "listen_protocol cannot be 'static'; static sites are only for upstream configuration",
+		})
+		return listenConfig, errors, warnings
+	}
+
+	// Determine effective listen protocol
+	if upstream.Protocol.IsStream() {
+		// Upstream is TCP or UDP
+		if explicitProtocol {
+			// User explicitly specified listen protocol
+			if listenConfig.Protocol != upstream.Protocol {
+				// Different protocol - this is an error
+				errors = append(errors, &MappingError{
+					Key:     upstreamKey,
+					Value:   listenerKey,
+					Message: fmt.Sprintf("listen_protocol '%s' does not match upstream protocol '%s'; this mapping will be ignored", listenConfig.Protocol, upstream.Protocol),
+				})
+				return listenConfig, errors, warnings
+			}
+			// Same protocol - redundant but allowed (warning)
+			warnings = append(warnings, &MappingWarning{
+				Key:     upstreamKey,
+				Value:   listenerKey,
+				Message: fmt.Sprintf("explicit listen_protocol '%s' is redundant when upstream is also '%s'; you can omit the <protocol> prefix", listenConfig.Protocol, upstream.Protocol),
+			})
+		} else {
+			// Smart mode: use upstream protocol
+			listenConfig.Protocol = upstream.Protocol
+		}
+	} else if upstream.Protocol.IsHTTP() || upstream.Protocol == ProtocolStatic {
+		// Upstream is HTTP, HTTPS, or Static
+		if explicitProtocol {
+			// User explicitly specified listen protocol
+			if !listenConfig.Protocol.IsHTTP() {
+				// Non-HTTP listen for HTTP/HTTPS/Static upstream - error
+				errors = append(errors, &MappingError{
+					Key:     upstreamKey,
+					Value:   listenerKey,
+					Message: fmt.Sprintf("listen_protocol '%s' is not compatible with upstream protocol '%s'; only http/https are allowed", listenConfig.Protocol, upstream.Protocol),
+				})
+				return listenConfig, errors, warnings
+			}
+			// Explicit http/https is allowed
+		} else {
+			// Smart mode: determine based on certificate
+			// If has certificate or upstream is https -> https
+			// Otherwise -> http
+			if hasCertificate || upstream.Protocol == ProtocolHTTPS {
+				listenConfig.Protocol = ProtocolHTTPS
+			} else {
+				listenConfig.Protocol = ProtocolHTTP
+			}
+		}
+	}
+
+	return listenConfig, errors, warnings
+}
+
+// ValidatedMapping represents a validated proxy mapping
+type ValidatedMapping struct {
+	UpstreamKey  string
+	ListenerKey  string
+	Upstream     Upstream
+	ListenConfig ListenConfig
+	Errors       []error
+	Warnings     []*MappingWarning
+}
+
+// ValidateConfig validates all proxy mappings in the config.
+// Returns validated mappings (including those with errors for logging),
+// and a boolean indicating if there were any fatal errors.
+//
+// Mappings with errors are excluded from the returned slice,
+// but their errors are collected for reporting.
+func ValidateConfig(cfg *Config, certMap map[string]bool) ([]ValidatedMapping, []error, []*MappingWarning) {
+	var validMappings []ValidatedMapping
+	var allErrors []error
+	var allWarnings []*MappingWarning
+
+	for upstreamKey, listenerKeys := range cfg.Ports {
+		// Skip static site keys - they are handled separately
+		if IsStaticSiteKey(upstreamKey) {
+			continue
+		}
+
+		// For TCP/UDP upstreams, the listenerKeys are actually upstream targets
+		// We need to check if this is a stream mapping
+		upstream := ParseUpstream(upstreamKey)
+		if upstream.Protocol.IsStream() {
+			// Stream mapping: upstreamKey is the listen side, listenerKeys are targets
+			for _, targetKey := range listenerKeys {
+				listenConfig, errors, warnings := ValidateMapping(upstreamKey, targetKey, false)
+				mapping := ValidatedMapping{
+					UpstreamKey:  upstreamKey,
+					ListenerKey:  targetKey,
+					Upstream:     upstream,
+					ListenConfig: listenConfig,
+					Errors:       errors,
+					Warnings:     warnings,
+				}
+				allErrors = append(allErrors, errors...)
+				allWarnings = append(allWarnings, warnings...)
+
+				if len(errors) == 0 {
+					validMappings = append(validMappings, mapping)
+				}
+			}
+		} else {
+			// HTTP/HTTPS/Static mapping: upstreamKey is the target, listenerKeys are domains
+			for _, listenerKey := range listenerKeys {
+				// Extract domain from listenerKey to check certificate
+				domain := listenerKey
+				if idx := strings.Index(listenerKey, "/"); idx > 0 {
+					domain = listenerKey[:idx]
+				}
+				hasCert := certMap[domain]
+
+				listenConfig, errors, warnings := ValidateMapping(upstreamKey, listenerKey, hasCert)
+				mapping := ValidatedMapping{
+					UpstreamKey:  upstreamKey,
+					ListenerKey:  listenerKey,
+					Upstream:     upstream,
+					ListenConfig: listenConfig,
+					Errors:       errors,
+					Warnings:     warnings,
+				}
+				allErrors = append(allErrors, errors...)
+				allWarnings = append(allWarnings, warnings...)
+
+				if len(errors) == 0 {
+					validMappings = append(validMappings, mapping)
+				}
+			}
+		}
+	}
+
+	return validMappings, allErrors, allWarnings
 }
