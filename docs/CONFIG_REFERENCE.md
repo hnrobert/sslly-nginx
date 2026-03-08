@@ -2,9 +2,9 @@
 
 This document describes the complete configuration format and rules for sslly-nginx.
 
-## Configuration Format
+## Overview
 
-sslly-nginx uses YAML configuration files with a key-value mapping format. Each mapping consists of a **upstream key** and a list of **listener keys**.
+sslly-nginx uses YAML configuration files with a key-value mapping format:
 
 ```yaml
 upstream_key:
@@ -12,294 +12,296 @@ upstream_key:
   - listener_key_2
 ```
 
-Each listener key in the list can be:
+## upstream_key Format
 
-- **Domain**: `example.com`, `api.example.com`
-- **Upstream**: `192.168.1.1:8080` (only if manually specified)
-- **Listener**: `8080` (shorthand without `:`)
-
-## Key Format Overview
-
-There are three types of keys:
-
-| Key Type | Format | Example | Description |
-|----------|-------|---------|-------------|
-| **Upstream Key** (left side) | `address` | `192.168.1.1:8080` | Defines where traffic goes |
-| **Listener Key** (in list) | `domain[/path]` or `host\|port` | `example.com/api` or `192.168.1.1\|8080` | Defines where traffic is received |
-| **Static Site Key** (left side) | `/directory` | `/app/static` | Defines static file serving |
-
-### Upstream Key (Left Side)
-
-The upstream key format follows this structure:
-
-### Basic Format
-
-```bash
-[<protocol>][host]:[port][/path]
+```md
+<upstream_protocol>domain:port/routes
 ```
 
-Each component is optional based on context. See the tables below for details.
+or for static sites:
 
-## Component Tables
+```md
+static_directory//url_route
+```
 
-### 1. Protocol Prefix (Optional)
+### upstream_key Components
 
-| Prefix | Description | Default Behavior |
-|-------|-------------|------------------|
-| `<http>` | Explicit HTTP protocol | Use HTTP for upstream connection |
-| `<https>` | HTTPS protocol | Use HTTPS for upstream connection |
-| `<tcp>` | TCP stream | TCP port forwarding (layer 4) |
-| `<udp>` | UDP stream | UDP port forwarding (layer 4) |
-| (none) | Smart mode | Default behavior based on context |
+| Component | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `upstream_protocol` | No | `http` | Protocol prefix: `https`, `tcp`, `udp`. Omit for `http` |
+| `domain` | No | `127.0.0.1` | IP address or hostname. IPv6 must use brackets `[::1]` |
+| `port` | No | Protocol default | Port number |
+| `routes` | No | - | URL path routing (e.g., `/api`) |
+| `static_directory` | - | - | Absolute filesystem path starting with `/` |
 
-**Smart Mode Behavior:**
+### Protocol Default Ports
 
-- For TCP/UDP upstream: automatically use TCP/UDP
-- For HTTP/HTTPS upstream: **Adaptive mode**
-  - If domain has SSL certificate → HTTPS
-  - If upstream is `<https>` → HTTPS
+- **HTTP** (default): 80
+- **HTTPS**: 443
+- **TCP/UDP**: Required (error if missing)
+
+### Static Route Rules
+
+- Only absolute paths starting with `/` are recognized as static sites
+- Use `//` to separate directory from URL route
+- Colon (`:`) in static path is NOT a port separator
+
+### upstream_key Separator Rules
+
+- If only `domain` or `port` is specified (not both), the `:` can be omitted
+- For static routes with URL paths, use `//` as separator
+
+### Upstream Format Examples
+
+| Type | Format | Parsed As |
+|------|--------|-----------|
+| Port only | `8080` | `http://127.0.0.1:8080` |
+| IP:port | `192.168.1.1:3000` | `http://192.168.1.1:3000` |
+| Domain only | `api.example.com` | `http://api.example.com:80` |
+| HTTPS upstream | `<https>api.secure.com:8443` | `https://api.secure.com:8443` |
+| HTTPS domain | `<https>api.secure.com` | `https://api.secure.com:443` |
+| TCP stream | `<tcp>9122` | TCP listen on 9122 |
+| UDP stream | `<udp>9123` | UDP listen on 9123 |
+| Path routing | `192.168.1.1:8080/api` | `http://192.168.1.1:8080/api` |
+| IPv6 | `[::1]:8080` | `http://[::1]:8080` |
+| Static simple | `/app/static` | Serve `/app/static` |
+| Static with route | `/app/static//docs` | Serve `/app/static` at `/docs` |
+| Static with colon | `/app/static:v2` | Serve `/app/static:v2` |
+
+## listener_key Format
+
+```md
+<listen_protocol>listened_server_name|listened_port
+```
+
+### listener_key Components
+
+| Component | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `listen_protocol` | No | Smart mode | Listen protocol: `http`, `https`, `tcp`, `udp` |
+| `listened_server_name` | No | All interfaces | Server name (domain) to listen on |
+| `listened_port` | No | Env var ports | Listen port |
+
+### Smart Mode Behavior
+
+When `listen_protocol` is not specified:
+
+- **TCP/UDP upstream** → automatically use same protocol for listen
+- **HTTP/HTTPS upstream** → adaptive based on certificate:
+  - Domain has SSL certificate → HTTPS
+  - Upstream is `<https>` → HTTPS
   - Otherwise → HTTP
-- Manual specification (`<http>` or `<https>`) disables auto-switching
 
-### 2. Host Component
+### listener_key Separator Rules
 
-| Format | Description | Examples |
-|-------|-------------|----------|
-| IPv4 address | IP address without brackets | `192.168.1.1`, `10.0.0.1` |
-| IPv6 address | **Must** be wrapped in brackets | `[2001:db8::1]`, `[::1]` |
-| Hostname | Domain name or hostname | `localhost`, `example.com`, `server.local` |
-| (none) | Default to localhost | Results in `127.0.0.1` |
+- Use `|` to separate `listened_server_name` and `listened_port`
+- If only one is specified, the `|` can be omitted
 
-**Important:** IPv6 addresses must always be wrapped in brackets: `[ipv6:address]`
+### Listener Format Examples
 
-### 3. Port Component
+| Format | Example | Description |
+|--------|---------|-------------|
+| Domain only | `example.com` | Listen on domain, default port |
+| Port only | `8080` | Listen on port, all domains |
+| Domain\|port | `example.com\|8080` | Specific domain and port |
+| Explicit HTTP | `<http>example.com` | Force HTTP protocol |
+| Explicit HTTPS | `<https>example.com` | Force HTTPS protocol |
+| TCP stream | `<tcp>8122` | TCP listen on 8122 |
 
-| Protocol | Required? | Default | Invalid Configuration |
-|----------|-----------|--------|----------------------|
-| HTTP | No | 80 | - |
-| HTTPS | No | 443 | - |
-| TCP | **Yes** | - | Config ignored if port missing |
-| UDP | **Yes** | - | Config ignored if port missing |
-| Static | **No** | - | **Error** if port specified |
+## Format Types
 
-**Examples:**
+### HTTP/HTTPS Proxy
 
-- `192.168.1.1:8080` → Port 8080
-- `example.com` → Port 80 (HTTP default)
-- `<https>example.com` → Port 443 (HTTPS default)
-- `<tcp>9122` → Port 9122 (TCP, required)
-- `/app/static:8080` → **ERROR** (static cannot have port)
-
-### 4. Path Component (Optional)
-
-Adds path-based routing to the upstream.
-
-| Format | Description | Example |
-|-------|-------------|---------|
-| `/path` | URL path prefix | `/api`, `/v1`, `/app` |
-
-**Behavior:**
-
-- Requests to `domain.com/path` route to this upstream
-- Different paths on same domain can route to different upstreams
-
-## Domain List Format
-
-The domain list specifies which domains route to the upstream.
-
-### Domain List Basic Format
+Basic reverse proxy configuration.
 
 ```yaml
-- domain.com
-- domain.com/path
-```
-
-### Domain with Path
-
-You can specify a URL path directly in the domain:
-
-```yaml
-8080:
-  - example.com/api
-  - example.com/docs
-```
-
-This routes `/api` and `/docs` paths on `example.com` to port 8080.
-
-## Static Site Configuration
-
-Static sites are configured using directory paths (starting with `.` or `/`) instead of network addresses.
-
-### Static Site Formats
-
-#### Format 1: Directory with Domain Path
-
-```yaml
-/app/static:
-  - example.com/home
-  - example.com/docs
-```
-
-This serves the **same directory** at **different URL paths**:
-
-- `example.com/home` → serves files from `/app/static`
-- `example.com/docs` → serves files from `/app/static`
-
-**Use case:** One directory, multiple entry points.
-
-#### Format 2: Directory with Route Path (Key-based)
-
-```yaml
-"[/app/static]/home":
-  - example.com
-```
-
-This serves files at `example.com/home` from `/app/static`.
-
-**Difference from Format 1:**
-
-- Route path (`/home`) is bound to the **directory key**
-- Cannot serve same directory at multiple paths without duplicating the key
-- More explicit: the route is clearly associated with the directory
-
-**Use case:** Directory dedicated to a specific route.
-
-### Static Site Rules
-
-1. **Key format**: Must start with `.` or `/`
-2. **Bracket syntax**: `"[directory]/route"` defines route path
-3. **No ports allowed**: Static sites cannot specify ports (error if attempted)
-4. **SPA support**: If `index.html` exists, Nginx enables SPA routing with `try_files`
-5. **Direct serving**: Files served directly by Nginx (no proxy layer)
-
-## Complete Examples
-
-### HTTP Proxy
-
-```yaml
-# Proxy to localhost:8080 (HTTP default)
+# Port only (proxies to 127.0.0.1:8080)
 8080:
   - example.com
+  - www.example.com
 
-# Proxy to specific IP with custom port
-192.168.1.1:3000:
-  - api.example.com
-```
+# IP:port (proxies to specific IP)
+192.168.50.2:1234:
+  - lan.example.com
 
-### HTTPS Upstream
+# Hostname:port
+example-server.local:8080:
+  - remote.example.com
 
-```yaml
-# Proxy to HTTPS backend
-<https>api.secure.com:
-  - example.com
-
-# Proxy to HTTPS backend with custom port
-<https>192.168.1.1:8443:
-  - secure.example.com
-```
-
-### IPv6 Configuration
-
-```yaml
-# IPv6 upstream (brackets required for address)
-'[2001:db8::1]:8080':
+# IPv6 with brackets
+"[2001:db8::1]:3000":
   - ipv6.example.com
 
-# HTTPS to IPv6 upstream
-'<https>[2001:db8::1]:8443':
-  - secure-ipv6.example.com
-```
+# HTTPS upstream (prevents "plain HTTP to HTTPS port" errors)
+"<https>192.168.50.2:8443":
+  - secure-backend.example.com
 
-### Path-Based Routing
-
-```yaml
-# Main site
+# Path-based routing (multiple backends on same domain)
 9012:
-  - example.com
-
-# API on different server
-192.168.1.1:8080/api:
-  - example.com/api
-
-# Docs on yet another server
-192.168.1.2:8080/docs:
-  - example.com/docs
+  - shared.example.com
+192.168.50.2:5678/api:
+  - shared.example.com/api
 ```
 
-### TCP/UDP Forwarding
+### TCP/UDP Stream Forwarding
+
+Layer 4 port forwarding. The format is
 
 ```yaml
-# TCP forwarding (port required)
+<protocol>listen_port:
+  - target_port
+```
+
+```yaml
+# TCP forwarding - listen on 9122, forward to localhost:8122
 <tcp>9122:
   - 8122
 
-# UDP forwarding (port required)
+# TCP forwarding to specific host
+<tcp>9122:
+  - 192.168.50.1|22
+
+# UDP forwarding
 <udp>9123:
   - 8123
 
-# TCP to specific host (use | to separate host and port)
-<tcp>192.168.1.1|22:
-  - 5022
+# TCP on port 443 (ssl_preread enabled automatically)
+<tcp>443:
+  - 192.168.50.1|22
 ```
 
-### Static Sites
+**Important:**
+
+- Port is **required** for TCP/UDP upstream
+- For TCP on port 443, `ssl_preread` is automatically enabled
+- Use `|` to specify target host for stream forwarding
+
+### Static Site Serving
+
+Serve local directories as static websites.
 
 ```yaml
-# Basic static site
+# Simple directory (serves files at root)
 /app/static:
   - static.example.com
 
-# Multiple paths from same directory
-/app/static:
-  - docs.example.com/api
-  - docs.example.com/guide
+# Directory with multiple URL paths
+/app/static/docs:
+  - example.com/api
+  - example.com/guide
+  - example.com/docs
 
-# Directory with route path (key-based)
-"[/app/static]/home":
-  - example.com
+# Directory with explicit route path (using // separator)
+/app/static//home:
+  - yourdomain.com
 
-# Directory with colon in path (allowed)
+# Directory with colon in path (colon is NOT port separator)
 "/app/static:v2":
   - v2.example.com
 ```
 
-## Configuration Processing Order
+**Rules:**
 
-Configuration is processed from **specific to general** (child to parent):
+- Key must start with `/` for static detection
+- Use `//` to separate directory from URL route
+- Colon (`:`) in path is NOT a port separator
+- SPA support enabled if `index.html` exists
 
-1. **Path-specific routes** (e.g., `/api`) processed first
-2. **Root routes** (`/`) processed last
-3. **Longest path matches first** in generated Nginx config
+## Validation Rules
 
-This ensures that specific paths take precedence over general ones.
+### Protocol Compatibility
+
+| Upstream | Listener | Behavior |
+|---------|----------|----------|
+| HTTP/HTTPS | HTTP/HTTPS | Allowed |
+| HTTP/HTTPS | TCP/UDP | Error - config ignored |
+| HTTP/HTTPS | Static | Error - config ignored |
+| TCP/UDP | Same protocol | Warning - redundant |
+| TCP/UDP | Different protocol | Error - config ignored |
+| Static | HTTP/HTTPS | Allowed (smart mode) |
+| Static | TCP/UDP | Error - config ignored |
+
+### Error Handling
+
+| Error Type | Behavior |
+|------------|----------|
+| YAML format error | Entire configuration fails |
+| Invalid upstream key | Individual entry ignored |
+| Invalid listener key | Individual entry ignored |
+| Protocol mismatch | Individual entry ignored |
+| Missing TCP/UDP port | Individual entry ignored |
+
+**Note:** Non-fatal errors allow other valid configurations to continue working.
 
 ## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SSLLY_DEFAULT_HTTP_LISTEN_PORT` | 80 | HTTP listen port |
-| `SSLLY_DEFAULT_HTTPS_LISTEN_PORT` | 443 | HTTPS listen port |
-| `SSLLY_EXAMPLE_DIR` | `/etc/sslly/configs/` | Example config directory |
+| `SSLLY_DEFAULT_HTTP_LISTEN_PORT` | 80 | Default HTTP listen port |
+| `SSLLY_DEFAULT_HTTPS_LISTEN_PORT` | 443 | Default HTTPS listen port |
 
-**Note:** Legacy `SSL_NGINX_HTTP_PORT` and `SSL_NGINX_HTTPS_PORT` are still supported for backward compatibility.
+**Legacy Variables (deprecated):**
 
-## Error Handling
+- `SSL_NGINX_HTTP_PORT`
+- `SSL_NGINX_HTTPS_PORT`
 
-| Error Type | Behavior |
-|------------|----------|
-| Missing port for TCP/UDP | Config entry ignored, error logged |
-| Port specified for static site | Config entry fails with error |
-| Invalid directory for static site | Config entry fails with error |
-| Parse error in key | Config entry fails with error |
+## Complete Examples
 
-Non-fatal errors allow other valid configurations to continue working.
+### Multi-Service Configuration
 
-## Best Practices
+```yaml
+# Main application
+8080:
+  - example.com
+  - www.example.com
 
-1. **Use explicit protocols** for clarity when needed
-2. **Use bracket syntax** for IPv6 addresses
-3. **Use path-based routing** for microservices on same domain
-4. **Use Format 1 for static sites** when serving multiple paths from same directory
-5. **Use Format 2 for static sites** when directory is dedicated to a single route
-6. **Organize certificates** in subdirectories under `ssl/`
-7. **Use HTTPS upstream prefix** to prevent "plain HTTP to HTTPS port" errors
+# API service with path routing
+192.168.1.1:3000/api:
+  - example.com/api
+
+# Admin panel on different backend
+192.168.1.2:8080/admin:
+  - example.com/admin
+
+# HTTPS backend
+<https>secure-api.internal:8443:
+  - secure.example.com
+
+# Static documentation
+/app/docs:
+  - docs.example.com
+
+# Static with explicit route
+/app/static//assets:
+  - cdn.example.com
+
+# TCP database forwarding
+<tcp>5432:
+  - 5432
+```
+
+### IPv6 Configuration
+
+```yaml
+# IPv6 upstream
+'[2001:db8::1]:8080':
+  - ipv6.example.com
+
+# HTTPS to IPv6
+'<https>[2001:db8::1]:8443':
+  - secure-ipv6.example.com
+```
+
+### Static Sites with Routes
+
+```yaml
+# Simple static site
+/app/static:
+  - static.example.com
+
+# Multiple routes from same directory
+/app/static//docs:
+  - example.com/docs
+/app/static//api-docs:
+  - example.com/api-docs
+```

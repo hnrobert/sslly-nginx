@@ -122,10 +122,9 @@ type StaticSiteSpec struct {
 
 // ParseStaticSiteKey parses a proxy.yaml mapping key that represents a local static directory.
 //
-// Rules (NEW - after refactoring):
-//   - If the key starts with '.' or '/', it's treated as a filesystem directory.
-//   - If the key is in the form "[DIR]/route", DIR is treated as a filesystem directory
-//     and "/route" is used as the domain route prefix.
+// Rules:
+//   - Only keys starting with '/' are treated as static sites.
+//   - Use '//' to separate directory from route path: /app/static//docs
 //   - Colons ':' are treated as part of the file path (NOT as port separators).
 //   - If the key has a <protocol> prefix, it is ignored.
 func ParseStaticSiteKey(key string) (StaticSiteSpec, bool, error) {
@@ -138,55 +137,29 @@ func ParseStaticSiteKey(key string) (StaticSiteSpec, bool, error) {
 	if strings.HasPrefix(k, "<") {
 		closeIdx := strings.Index(k, ">")
 		if closeIdx > 0 {
-			// Note: We can't use logger here directly to avoid import cycle,
-			// so we'll just strip the prefix silently
 			k = strings.TrimSpace(k[closeIdx+1:])
 		}
 	}
 
-	// Bracket syntax: [DIR]/route
-	// IMPORTANT: brackets are NOT exclusive to static-site mappings.
-	// Only treat them as static-site mappings when DIR starts with '.' or '/'.
-	if strings.HasPrefix(k, "[") {
-		closeIdx := strings.Index(k, "]")
-		if closeIdx < 0 {
-			// If it *looks* like a static mapping ("[./" or "[/"), report a helpful error.
-			if strings.HasPrefix(k, "[.") || strings.HasPrefix(k, "[/") {
-				return StaticSiteSpec{}, true, fmt.Errorf("invalid static site mapping %q: missing closing ']'", k)
-			}
-			return StaticSiteSpec{}, false, nil
-		}
-		inside := strings.TrimSpace(k[1:closeIdx])
-		if inside == "" {
-			// Treat as static mapping only when it looks like one.
-			if strings.HasPrefix(k, "[.") || strings.HasPrefix(k, "[/") {
-				return StaticSiteSpec{}, true, fmt.Errorf("invalid static site mapping %q: empty directory", k)
-			}
-			return StaticSiteSpec{}, false, nil
-		}
-		if !(strings.HasPrefix(inside, ".") || strings.HasPrefix(inside, "/")) {
-			// Not a static site mapping (e.g. <https>9143, [::1]:9000)
-			return StaticSiteSpec{}, false, nil
-		}
-
-		suffix := strings.TrimSpace(k[closeIdx+1:])
-		routePath := ""
-		if suffix != "" {
-			if !strings.HasPrefix(suffix, "/") {
-				return StaticSiteSpec{}, true, fmt.Errorf("invalid static site mapping %q: route must start with '/'", k)
-			}
-			routePath = normalizeRoutePath(suffix)
-		}
-
-		// Colons are now part of the directory path - no port parsing
-		return StaticSiteSpec{Dir: inside, RoutePath: routePath}, true, nil
-	}
-
-	if !(strings.HasPrefix(k, ".") || strings.HasPrefix(k, "/")) {
+	// Only absolute paths starting with '/' are static sites
+	if !strings.HasPrefix(k, "/") {
 		return StaticSiteSpec{}, false, nil
 	}
 
-	// Colons are now part of the directory path - no port parsing
+	// Check for '//' separator (directory//route)
+	if doubleSlashIdx := strings.Index(k, "//"); doubleSlashIdx > 0 {
+		dir := k[:doubleSlashIdx]
+		routePath := k[doubleSlashIdx+2:]
+
+		if routePath == "" {
+			return StaticSiteSpec{Dir: dir, RoutePath: ""}, true, nil
+		}
+		if !strings.HasPrefix(routePath, "/") {
+			routePath = "/" + routePath
+		}
+		return StaticSiteSpec{Dir: dir, RoutePath: normalizeRoutePath(routePath)}, true, nil
+	}
+
 	return StaticSiteSpec{Dir: k}, true, nil
 }
 
