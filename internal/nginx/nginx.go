@@ -550,7 +550,8 @@ events {
 	return sb.String()
 }
 
-// generateStaticSiteLocations generates nginx location blocks for static sites using root directive
+// generateStaticSiteLocations generates nginx location blocks for static sites
+// Uses root directive for "/" path, alias directive for non-root paths
 func generateStaticSiteLocations(sb *strings.Builder, routes []StaticRouteConfig, corsConfig *config.CORSConfig) {
 	corsHeaders := generateCORSHeaders(corsConfig)
 
@@ -563,37 +564,67 @@ func generateStaticSiteLocations(sb *strings.Builder, routes []StaticRouteConfig
 			locationPath = "/"
 		}
 
-		// For non-root paths, add redirect for path without trailing slash
-		if locationPath != "/" {
+		isRootPath := locationPath == "/"
+
+		if isRootPath {
+			// Root path: use root directive
+			if route.HasIndex {
+				// SPA support with try_files
+				sb.WriteString(fmt.Sprintf(`        location / {
+            root %s;
+            index index.html;
+            try_files $uri $uri/ /index.html;
+
+%s
+        }
+
+`, route.StaticSite.Dir, corsHeaders))
+			} else {
+				// Simple static file serving
+				fmt.Fprintf(sb, `        location / {
+            root %s;
+
+%s
+        }
+
+`, route.StaticSite.Dir, corsHeaders)
+			}
+		} else {
+			// Non-root path: use alias directive
+			// Add redirect for path without trailing slash
 			sb.WriteString(fmt.Sprintf(`        location = %s {
             return 301 $scheme://$host%s/;
         }
 
 `, locationPath, locationPath))
-			locationPath = locationPath + "/"
-		}
 
-		// Generate location block with root directive
-		if route.HasIndex {
-			// SPA support with try_files
-			sb.WriteString(fmt.Sprintf(`        location %s {
-            root %s;
+			// Ensure alias path ends with /
+			aliasPath := route.StaticSite.Dir
+			if !strings.HasSuffix(aliasPath, "/") {
+				aliasPath += "/"
+			}
+
+			if route.HasIndex {
+				// SPA support with try_files (alias mode uses different path resolution)
+				sb.WriteString(fmt.Sprintf(`        location %s/ {
+            alias %s;
             index index.html;
             try_files $uri $uri/ %sindex.html;
 
 %s
         }
 
-`, locationPath, route.StaticSite.Dir, locationPath, corsHeaders))
-		} else {
-			// Simple static file serving
-			sb.WriteString(fmt.Sprintf(`        location %s {
-            root %s;
+`, locationPath, aliasPath, aliasPath, corsHeaders))
+			} else {
+				// Simple static file serving
+				fmt.Fprintf(sb, `        location %s/ {
+            alias %s;
 
 %s
         }
 
-`, locationPath, route.StaticSite.Dir, corsHeaders))
+`, locationPath, aliasPath, corsHeaders)
+			}
 		}
 	}
 }

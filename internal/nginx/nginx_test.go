@@ -112,13 +112,14 @@ func TestGenerateConfig_StaticSites(t *testing.T) {
 	// Generate nginx config
 	nginxConfig := GenerateConfig(cfg, nil)
 
-	// Check for root directive in static sites
+	// Check for root directive for root path static site
 	if !strings.Contains(nginxConfig, "root "+staticDir) {
-		t.Error("Expected nginx config to contain root directive for static site")
+		t.Error("Expected nginx config to contain root directive for static site (root path)")
 	}
 
-	if !strings.Contains(nginxConfig, "root "+site1Dir) {
-		t.Error("Expected nginx config to contain root directive for site1")
+	// Non-root path should use alias, not root
+	if !strings.Contains(nginxConfig, "alias "+site1Dir) {
+		t.Error("Expected nginx config to contain alias directive for site1 (non-root path)")
 	}
 
 	// Check for try_files directive (SPA support)

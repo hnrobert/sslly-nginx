@@ -29,10 +29,12 @@
         "preread",
         "priv",
         "PROCS",
+        "sindex",
         "softprops",
         "sslly",
         "subj",
         "tmpl",
+        "unconfigured",
         "venv",
         "writable",
         "yourdomain"
