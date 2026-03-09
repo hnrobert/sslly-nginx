@@ -606,15 +606,17 @@ func generateStaticSiteLocations(sb *strings.Builder, routes []StaticRouteConfig
 
 			if route.HasIndex {
 				// SPA support with try_files (alias mode uses different path resolution)
+				// For alias, the try_files fallback must be a URI (starting with /)
+				// which triggers an internal redirect to the named location
 				sb.WriteString(fmt.Sprintf(`        location %s/ {
             alias %s;
             index index.html;
-            try_files $uri $uri/ %sindex.html;
+            try_files $uri $uri/ %s/index.html;
 
 %s
         }
 
-`, locationPath, aliasPath, aliasPath, corsHeaders))
+`, locationPath, aliasPath, locationPath, corsHeaders))
 			} else {
 				// Simple static file serving
 				fmt.Fprintf(sb, `        location %s/ {
