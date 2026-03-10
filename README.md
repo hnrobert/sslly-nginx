@@ -2,11 +2,9 @@
 
 A smart Nginx SSL reverse proxy manager that automatically configures SSL certificates and proxies traffic to your local applications.
 
-> I HATE writing Nginx config, that's why this project was born.
-
-Just tell this tool the port and domain, and I handle the rest.
-
-<p align="right"><strong>Robert He</strong></p>
+> I HATE writing Nginx config, that's why this project was born.  
+> Just tell this tool the port and domain, and let it handle the rest.  
+> <p align="right"><strong>Robert He</strong></p>
 
 ![logo](assets/images/logo.png)
 
