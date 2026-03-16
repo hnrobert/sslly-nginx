@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/hnrobert/sslly-nginx/internal/logger"
 )
@@ -48,14 +49,38 @@ func ensureConfigFile(destPath, defaultPath string) error {
 	return nil
 }
 
-// ensureDirWritable makes a directory and its existing contents writable by any user,
-// and attempts to chown to UID/GID 1000 when running as root.
+// ensureDirWritable makes a directory and its existing contents writable by any user.
+// For root-owned files/directories, it sets permissions to 0777/0666 and chowns to 1000:1000.
 func ensureDirWritable(dir string) error {
 	// Create if not exists.
-	// Use a conservative default; if the directory is a host-mounted volume, chmod/chown may be denied.
 	if err := os.MkdirAll(dir, 0777); err != nil {
 		return err
 	}
+
+	// Fix permissions for root-owned files recursively
+	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // continue walking
+		}
+
+		// Check if owned by root (UID 0)
+		stat, ok := info.Sys().(*syscall.Stat_t)
+		if !ok || stat.Uid != 0 {
+			return nil
+		}
+
+		// Set permissions: directories to 0777, files to 0666
+		if info.IsDir() {
+			_ = os.Chmod(path, 0777)
+		} else {
+			_ = os.Chmod(path, 0666)
+		}
+
+		// Try to chown to 1000:1000
+		_ = os.Chown(path, 1000, 1000)
+
+		return nil
+	})
 
 	// Verify we can write to it.
 	tmp, err := os.CreateTemp(dir, ".writable-*")
