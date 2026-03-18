@@ -2,8 +2,10 @@
     "cSpell.words": [
         "addgroup",
         "adduser",
+        "Behavior",
         "Buildx",
         "cacheprep",
+        "chowns",
         "codepoint",
         "colored",
         "colors",
@@ -20,18 +22,25 @@
         "installsuffix",
         "Jellyfin",
         "keyout",
+        "labeled",
         "myapp",
         "newkey",
         "oneline",
         "pipefail",
+        "preread",
         "priv",
         "PROCS",
+        "sindex",
         "softprops",
         "sslly",
         "subj",
         "tmpl",
+        "unconfigured",
         "venv",
         "writable",
         "yourdomain"
-    ]
+    ],
+    "markdownlint.config": {
+        "no-inline-html": false
+    }
 }

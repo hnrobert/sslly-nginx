@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -23,6 +24,15 @@ type RouteConfig struct {
 	DomainPath string
 	BaseDomain string
 	Path       string
+}
+
+// StaticRouteConfig represents a static site routing configuration
+type StaticRouteConfig struct {
+	StaticSite config.StaticSiteSpec
+	DomainPath string
+	BaseDomain string
+	Path       string
+	HasIndex   bool
 }
 
 func NewManager() *Manager {
@@ -217,12 +227,17 @@ func GenerateConfig(cfg *config.Config, certMap map[string]ssl.Certificate) stri
 	var sb strings.Builder
 
 	// Read ports from environment with sensible defaults
+	// New variable names take precedence, fallback to legacy names for backward compatibility
 	httpPort := "80"
 	httpsPort := "443"
-	if p := os.Getenv("SSL_NGINX_HTTP_PORT"); p != "" {
+	if p := os.Getenv("SSLLY_DEFAULT_HTTP_LISTEN_PORT"); p != "" {
+		httpPort = p
+	} else if p := os.Getenv("SSL_NGINX_HTTP_PORT"); p != "" {
 		httpPort = p
 	}
-	if p := os.Getenv("SSL_NGINX_HTTPS_PORT"); p != "" {
+	if p := os.Getenv("SSLLY_DEFAULT_HTTPS_LISTEN_PORT"); p != "" {
+		httpsPort = p
+	} else if p := os.Getenv("SSL_NGINX_HTTPS_PORT"); p != "" {
 		httpsPort = p
 	}
 
@@ -230,6 +245,37 @@ func GenerateConfig(cfg *config.Config, certMap map[string]ssl.Certificate) stri
 	errorLogLevel := "error" // Default
 	if cfg.Log.Nginx.StderrAs != "" {
 		errorLogLevel = cfg.Log.Nginx.StderrAs
+	}
+
+	// Separate HTTP/HTTPS mappings from TCP/UDP mappings and static sites
+	var streamMappings []StreamMapping
+	httpPorts := make(map[string]bool)
+
+	// First pass: identify stream mappings, HTTP ports, and static sites
+	for portKey, domainPaths := range cfg.Ports {
+		// Check if it's a static site key - they use HTTP/HTTPS ports
+		if config.IsStaticSiteKey(portKey) {
+			httpPorts[httpPort] = true
+			httpPorts[httpsPort] = true
+			continue
+		}
+
+		listenConfig := config.ParseListenKey(portKey)
+
+		if listenConfig.Protocol.IsStream() {
+			// TCP/UDP mapping - get the upstream target from the first domain path
+			if len(domainPaths) > 0 {
+				upstream := config.ParseUpstream(domainPaths[0])
+				streamMappings = append(streamMappings, StreamMapping{
+					ListenConfig: listenConfig,
+					Upstream:     upstream,
+				})
+			}
+		} else {
+			// HTTP/HTTPS mapping
+			upstream := config.ParseUpstream(portKey)
+			httpPorts[upstream.Port] = true
+		}
 	}
 
 	// Nginx base configuration
@@ -243,7 +289,14 @@ events {
     worker_connections 1024;
 }
 
-http {
+`, errorLogLevel))
+
+	// Generate stream block for TCP/UDP if there are any stream mappings
+	if len(streamMappings) > 0 {
+		sb.WriteString(generateStreamBlock(streamMappings, httpPort, httpsPort))
+	}
+
+	sb.WriteString(`http {
     include /etc/nginx/mime.types;
     default_type application/octet-stream;
 
@@ -281,13 +334,57 @@ http {
     proxy_buffers 8 4k;
     proxy_busy_buffers_size 8k;
 
-`, errorLogLevel))
+`)
 
-	// Map: baseDomain -> []RouteConfig
+	// Map: baseDomain -> []RouteConfig (for proxy routes)
 	domainRoutes := make(map[string][]RouteConfig)
+	// Map: baseDomain -> []StaticRouteConfig (for static sites)
+	staticRoutes := make(map[string][]StaticRouteConfig)
 
 	// Parse all routes and group by base domain
 	for portKey, domainPaths := range cfg.Ports {
+		// Handle static sites
+		if config.IsStaticSiteKey(portKey) {
+			staticSpec, hasSpec := cfg.RuntimeStaticSites[portKey]
+			if !hasSpec {
+				// If not in RuntimeStaticSites, try to parse from key
+				spec, ok, err := config.ParseStaticSiteKey(portKey)
+				if err != nil || !ok {
+					continue
+				}
+				staticSpec = spec
+			}
+
+			// Check if index.html exists
+			hasIndex := false
+			if st, err := os.Stat(filepath.Join(staticSpec.Dir, "index.html")); err == nil && !st.IsDir() {
+				hasIndex = true
+			}
+
+			for _, domainPath := range domainPaths {
+				baseDomain, path := splitDomainPath(domainPath)
+				// If route path is specified in config and domain doesn't already have a path, use it
+				if staticSpec.RoutePath != "" && path == "" {
+					path = staticSpec.RoutePath
+				}
+				staticRoutes[baseDomain] = append(staticRoutes[baseDomain], StaticRouteConfig{
+					StaticSite: staticSpec,
+					DomainPath: domainPath,
+					BaseDomain: baseDomain,
+					Path:       path,
+					HasIndex:   hasIndex,
+				})
+			}
+			continue
+		}
+
+		listenConfig := config.ParseListenKey(portKey)
+
+		// Skip TCP/UDP mappings - they're handled in stream block
+		if listenConfig.Protocol.IsStream() {
+			continue
+		}
+
 		upstream := config.ParseUpstream(portKey)
 
 		for _, domainPath := range domainPaths {
@@ -305,7 +402,14 @@ http {
 	// Collect domains with and without certificates
 	var domainsWithCerts []string
 	var domainsWithoutCerts []string
+	allDomains := make(map[string]bool)
 	for baseDomain := range domainRoutes {
+		allDomains[baseDomain] = true
+	}
+	for baseDomain := range staticRoutes {
+		allDomains[baseDomain] = true
+	}
+	for baseDomain := range allDomains {
 		cert, hasCert := ssl.FindCertificate(certMap, baseDomain)
 		if hasCert && cert.KeyPath != "" {
 			domainsWithCerts = append(domainsWithCerts, baseDomain)
@@ -376,8 +480,11 @@ http {
 `)
 	}
 
-	// Generate server blocks for each base domain
-	for baseDomain, routes := range domainRoutes {
+	// Generate server blocks for each base domain (combining proxy routes and static routes)
+	for baseDomain := range allDomains {
+		routes := domainRoutes[baseDomain]
+		staticSiteRoutes := staticRoutes[baseDomain]
+
 		cert, hasCert := ssl.FindCertificate(certMap, baseDomain)
 		if hasCert && cert.KeyPath == "" {
 			hasCert = false
@@ -393,157 +500,14 @@ http {
 
 `, baseDomain, httpPort, baseDomain))
 
-			spaUpstreams := make(map[string]string) // port -> scheme://addr
-			spaCors := generateCORSHeaders(corsConfig)
-
-			// Generate location blocks for each route (sorted by path length, longest first)
-			sortRoutesByPathLength(routes)
-			for _, route := range routes {
-				upstreamAddr := formatUpstreamAddr(route.Upstream)
-				locationPath := route.Path
-				if locationPath == "" {
-					locationPath = "/"
-				}
-
-				proxyPass := fmt.Sprintf("%s://%s", route.Upstream.Scheme, upstreamAddr)
-				if route.Upstream.Path != "" {
-					proxyPass += route.Upstream.Path
-				}
-
-				// For non-root paths, add redirect and use trailing slash
-				if locationPath != "/" {
-					// Add exact match redirect for path without trailing slash
-					sb.WriteString(fmt.Sprintf(`        location = %s {
-            return 301 $scheme://$host%s/;
-        }
-
-`, locationPath, locationPath))
-					// Use path with trailing slash for the actual location
-					locationPath = locationPath + "/"
-					// Add trailing slash to proxy_pass to strip the location path
-					if !strings.HasSuffix(proxyPass, "/") {
-						proxyPass += "/"
-					}
-				}
-
-				isStatic := cfg != nil && cfg.RuntimeStaticPorts != nil && cfg.RuntimeStaticPorts[route.Upstream.Port]
-				hasIndex := cfg != nil && cfg.RuntimeStaticHasIndex != nil && cfg.RuntimeStaticHasIndex[route.Upstream.Port]
-				if isStatic && hasIndex {
-					// SPA deep-link support: serve index.html on 404 (except for /assets/).
-					assetsPath := "/assets/"
-					if locationPath != "/" {
-						assetsPath = locationPath + "assets/"
-					}
-					sb.WriteString(fmt.Sprintf(`        location ^~ %s {
-	    proxy_pass %s;
-	    proxy_http_version 1.1;
-
-	    # Standard proxy headers
-	    proxy_set_header Host $host;
-	    proxy_set_header X-Real-IP $remote_addr;
-	    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-	    proxy_set_header X-Forwarded-Host $http_host;
-	    proxy_set_header X-Forwarded-Proto $scheme;
-
-	    # WebSocket support
-	    proxy_set_header Upgrade $http_upgrade;
-	    proxy_set_header Connection "upgrade";
-
-	    # Timeouts
-	    proxy_connect_timeout 60s;
-	    proxy_send_timeout 60s;
-	    proxy_read_timeout 60s;
-
-%s
-	}
-
-`, assetsPath, proxyPass, spaCors))
-
-					sb.WriteString(fmt.Sprintf(`        location %s {
-	    proxy_pass %s;
-	    proxy_http_version 1.1;
-
-	    # Standard proxy headers
-	    proxy_set_header Host $host;
-	    proxy_set_header X-Real-IP $remote_addr;
-	    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-	    proxy_set_header X-Forwarded-Host $http_host;
-	    proxy_set_header X-Forwarded-Proto $scheme;
-
-	    # WebSocket support
-	    proxy_set_header Upgrade $http_upgrade;
-	    proxy_set_header Connection "upgrade";
-
-	    # Timeouts
-	    proxy_connect_timeout 60s;
-	    proxy_send_timeout 60s;
-	    proxy_read_timeout 60s;
-
-	    # SPA deep-link fallback
-	    proxy_intercept_errors on;
-	    error_page 404 = @spa_fallback_%s;
-
-%s
-	}
-
-`, locationPath, proxyPass, route.Upstream.Port, spaCors))
-
-					spaUpstreams[route.Upstream.Port] = fmt.Sprintf("%s://%s", route.Upstream.Scheme, upstreamAddr)
-					continue
-				}
-
-				sb.WriteString(fmt.Sprintf(`        location %s {
-            proxy_pass %s;
-            proxy_http_version 1.1;
-
-            # Standard proxy headers
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Host $http_host;
-            proxy_set_header X-Forwarded-Proto $scheme;
-
-            # WebSocket support
-            proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection "upgrade";
-
-            # Timeouts
-            proxy_connect_timeout 60s;
-            proxy_send_timeout 60s;
-            proxy_read_timeout 60s;
-
-%s
-        }
-
-`, locationPath, proxyPass, generateCORSHeaders(corsConfig)))
+			// Generate location blocks for static sites
+			if len(staticSiteRoutes) > 0 {
+				generateStaticSiteLocations(&sb, staticSiteRoutes, corsConfig)
 			}
 
-			// Emit SPA fallback named locations (one per static upstream port).
-			for port, base := range spaUpstreams {
-				sb.WriteString(fmt.Sprintf(`        location @spa_fallback_%s {
-	    proxy_pass %s/index.html$is_args$args;
-	    proxy_http_version 1.1;
-
-	    # Standard proxy headers
-	    proxy_set_header Host $host;
-	    proxy_set_header X-Real-IP $remote_addr;
-	    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-	    proxy_set_header X-Forwarded-Host $http_host;
-	    proxy_set_header X-Forwarded-Proto $scheme;
-
-	    # WebSocket support
-	    proxy_set_header Upgrade $http_upgrade;
-	    proxy_set_header Connection "upgrade";
-
-	    # Timeouts
-	    proxy_connect_timeout 60s;
-	    proxy_send_timeout 60s;
-	    proxy_read_timeout 60s;
-
-%s
-	}
-
-`, port, base, spaCors))
+			// Generate location blocks for proxy routes
+			if len(routes) > 0 {
+				generateProxyLocations(&sb, routes, corsConfig)
 			}
 
 			sb.WriteString(`    }
@@ -566,113 +530,140 @@ http {
 
 `, baseDomain, httpsPort, baseDomain, cert.CertPath, cert.KeyPath))
 
-		spaUpstreams := make(map[string]string) // port -> scheme://addr
-		spaCors := generateCORSHeaders(corsConfig)
+		// Generate location blocks for static sites
+		if len(staticSiteRoutes) > 0 {
+			generateStaticSiteLocations(&sb, staticSiteRoutes, corsConfig)
+		}
 
-		// Generate location blocks for each route
-		sortRoutesByPathLength(routes)
-		for _, route := range routes {
-			upstreamAddr := formatUpstreamAddr(route.Upstream)
-			locationPath := route.Path
-			if locationPath == "" {
-				locationPath = "/"
+		// Generate location blocks for proxy routes
+		if len(routes) > 0 {
+			generateProxyLocations(&sb, routes, corsConfig)
+		}
+
+		sb.WriteString(`    }
+
+`)
+	}
+
+	sb.WriteString("}\n")
+
+	return sb.String()
+}
+
+// generateStaticSiteLocations generates nginx location blocks for static sites
+// Uses root directive for "/" path, alias directive for non-root paths
+func generateStaticSiteLocations(sb *strings.Builder, routes []StaticRouteConfig, corsConfig *config.CORSConfig) {
+	corsHeaders := generateCORSHeaders(corsConfig)
+
+	// Sort routes by path length (longest first)
+	sortStaticRoutesByPathLength(routes)
+
+	for _, route := range routes {
+		locationPath := route.Path
+		if locationPath == "" {
+			locationPath = "/"
+		}
+
+		isRootPath := locationPath == "/"
+
+		if isRootPath {
+			// Root path: use root directive
+			if route.HasIndex {
+				// SPA support with try_files
+				sb.WriteString(fmt.Sprintf(`        location / {
+            root %s;
+            index index.html;
+            try_files $uri $uri/ /index.html;
+
+%s
+        }
+
+`, route.StaticSite.Dir, corsHeaders))
+			} else {
+				// Simple static file serving
+				fmt.Fprintf(sb, `        location / {
+            root %s;
+
+%s
+        }
+
+`, route.StaticSite.Dir, corsHeaders)
 			}
-
-			proxyPass := fmt.Sprintf("%s://%s", route.Upstream.Scheme, upstreamAddr)
-			if route.Upstream.Path != "" {
-				proxyPass += route.Upstream.Path
-			}
-
-			// For non-root paths, add redirect and use trailing slash
-			if locationPath != "/" {
-				// Add exact match redirect for path without trailing slash
-				sb.WriteString(fmt.Sprintf(`        location = %s {
+		} else {
+			// Non-root path: use alias directive
+			// Add redirect for path without trailing slash
+			sb.WriteString(fmt.Sprintf(`        location = %s {
             return 301 $scheme://$host%s/;
         }
 
 `, locationPath, locationPath))
-				// Use path with trailing slash for the actual location
-				locationPath = locationPath + "/"
-				// Add trailing slash to proxy_pass to strip the location path
-				if !strings.HasSuffix(proxyPass, "/") {
-					proxyPass += "/"
-				}
+
+			// Ensure alias path ends with /
+			aliasPath := route.StaticSite.Dir
+			if !strings.HasSuffix(aliasPath, "/") {
+				aliasPath += "/"
 			}
 
-			isStatic := cfg != nil && cfg.RuntimeStaticPorts != nil && cfg.RuntimeStaticPorts[route.Upstream.Port]
-			hasIndex := cfg != nil && cfg.RuntimeStaticHasIndex != nil && cfg.RuntimeStaticHasIndex[route.Upstream.Port]
-			if isStatic && hasIndex {
-				assetsPath := "/assets/"
-				if locationPath != "/" {
-					assetsPath = locationPath + "assets/"
-				}
-				sb.WriteString(fmt.Sprintf(`        location ^~ %s {
-	    proxy_pass %s;
-	    proxy_http_version 1.1;
-
-	    # Standard proxy headers
-	    proxy_set_header Host $host;
-	    proxy_set_header X-Real-IP $remote_addr;
-	    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-	    proxy_set_header X-Forwarded-Host $http_host;
-	    proxy_set_header X-Forwarded-Proto $scheme;
-
-	    # WebSocket support
-	    proxy_set_header Upgrade $http_upgrade;
-	    proxy_set_header Connection "upgrade";
-
-	    # Set Secure flag for cookies when using HTTPS
-	    proxy_cookie_path / "/; Secure";
-
-	    # Timeouts
-	    proxy_connect_timeout 60s;
-	    proxy_send_timeout 60s;
-	    proxy_read_timeout 60s;
+			if route.HasIndex {
+				// SPA support with try_files (alias mode uses different path resolution)
+				// For alias, the try_files fallback must be a URI (starting with /)
+				// which triggers an internal redirect to the named location
+				sb.WriteString(fmt.Sprintf(`        location %s/ {
+            alias %s;
+            index index.html;
+            try_files $uri $uri/ %s/index.html;
 
 %s
-	}
+        }
 
-`, assetsPath, proxyPass, spaCors))
-
-				sb.WriteString(fmt.Sprintf(`        location %s {
-	    proxy_pass %s;
-	    proxy_http_version 1.1;
-
-	    # Standard proxy headers
-	    proxy_set_header Host $host;
-	    proxy_set_header X-Real-IP $remote_addr;
-	    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-	    proxy_set_header X-Forwarded-Host $http_host;
-	    proxy_set_header X-Forwarded-Proto $scheme;
-
-	    # WebSocket support
-	    proxy_set_header Upgrade $http_upgrade;
-	    proxy_set_header Connection "upgrade";
-
-	    # Set Secure flag for cookies when using HTTPS
-	    proxy_cookie_path / "/; Secure";
-
-	    # Timeouts
-	    proxy_connect_timeout 60s;
-	    proxy_send_timeout 60s;
-	    proxy_read_timeout 60s;
-
-	    # SPA deep-link fallback
-	    proxy_intercept_errors on;
-	    error_page 404 = @spa_fallback_%s;
+`, locationPath, aliasPath, locationPath, corsHeaders))
+			} else {
+				// Simple static file serving
+				fmt.Fprintf(sb, `        location %s/ {
+            alias %s;
 
 %s
-	}
+        }
 
-`, locationPath, proxyPass, route.Upstream.Port, spaCors))
-
-				spaUpstreams[route.Upstream.Port] = fmt.Sprintf("%s://%s", route.Upstream.Scheme, upstreamAddr)
-				continue
+`, locationPath, aliasPath, corsHeaders)
 			}
+		}
+	}
+}
 
-			// logger.Info("  Route: %s -> %s://%s (path: %s)", route.DomainPath, route.Upstream.Scheme, upstreamAddr, locationPath)
+// generateProxyLocations generates nginx location blocks for proxy routes
+func generateProxyLocations(sb *strings.Builder, routes []RouteConfig, corsConfig *config.CORSConfig) {
+	corsHeaders := generateCORSHeaders(corsConfig)
 
-			sb.WriteString(fmt.Sprintf(`        location %s {
+	// Sort routes by path length (longest first)
+	sortRoutesByPathLength(routes)
+
+	for _, route := range routes {
+		upstreamAddr := formatUpstreamAddr(route.Upstream)
+		locationPath := route.Path
+		if locationPath == "" {
+			locationPath = "/"
+		}
+
+		proxyPass := fmt.Sprintf("%s://%s", route.Upstream.Scheme, upstreamAddr)
+		if route.Upstream.Path != "" {
+			proxyPass += route.Upstream.Path
+		}
+
+		// For non-root paths, add redirect and use trailing slash
+		if locationPath != "/" {
+			sb.WriteString(fmt.Sprintf(`        location = %s {
+            return 301 $scheme://$host%s/;
+        }
+
+`, locationPath, locationPath))
+			locationPath = locationPath + "/"
+			if !strings.HasSuffix(proxyPass, "/") {
+				proxyPass += "/"
+			}
+		}
+
+		sb.WriteString(fmt.Sprintf(`        location %s {
             proxy_pass %s;
             proxy_http_version 1.1;
 
@@ -687,9 +678,6 @@ http {
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection "upgrade";
 
-            # Set Secure flag for cookies when using HTTPS
-            proxy_cookie_path / "/; Secure";
-
             # Timeouts
             proxy_connect_timeout 60s;
             proxy_send_timeout 60s;
@@ -698,52 +686,12 @@ http {
 %s
         }
 
-`, locationPath, proxyPass, generateCORSHeaders(corsConfig)))
-		}
-
-		for port, base := range spaUpstreams {
-			sb.WriteString(fmt.Sprintf(`        location @spa_fallback_%s {
-	    proxy_pass %s/index.html$is_args$args;
-	    proxy_http_version 1.1;
-
-	    # Standard proxy headers
-	    proxy_set_header Host $host;
-	    proxy_set_header X-Real-IP $remote_addr;
-	    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-	    proxy_set_header X-Forwarded-Host $http_host;
-	    proxy_set_header X-Forwarded-Proto $scheme;
-
-	    # WebSocket support
-	    proxy_set_header Upgrade $http_upgrade;
-	    proxy_set_header Connection "upgrade";
-
-	    # Set Secure flag for cookies when using HTTPS
-	    proxy_cookie_path / "/; Secure";
-
-	    # Timeouts
-	    proxy_connect_timeout 60s;
-	    proxy_send_timeout 60s;
-	    proxy_read_timeout 60s;
-
-%s
+`, locationPath, proxyPass, corsHeaders))
 	}
-
-`, port, base, spaCors))
-		}
-
-		sb.WriteString(`    }
-
-`)
-	}
-
-	sb.WriteString("}\n")
-
-	return sb.String()
 }
 
 // sortRoutesByPathLength sorts routes by path length (longest first) for proper nginx matching
 func sortRoutesByPathLength(routes []RouteConfig) {
-	// Simple bubble sort - good enough for small number of routes
 	for i := 0; i < len(routes)-1; i++ {
 		for j := 0; j < len(routes)-i-1; j++ {
 			if len(routes[j].Path) < len(routes[j+1].Path) {
@@ -751,4 +699,115 @@ func sortRoutesByPathLength(routes []RouteConfig) {
 			}
 		}
 	}
+}
+
+// sortStaticRoutesByPathLength sorts static routes by path length (longest first)
+func sortStaticRoutesByPathLength(routes []StaticRouteConfig) {
+	for i := 0; i < len(routes)-1; i++ {
+		for j := 0; j < len(routes)-i-1; j++ {
+			if len(routes[j].Path) < len(routes[j+1].Path) {
+				routes[j], routes[j+1] = routes[j+1], routes[j]
+			}
+		}
+	}
+}
+
+// StreamMapping represents a TCP/UDP stream mapping
+type StreamMapping struct {
+	ListenConfig config.ListenConfig
+	Upstream     config.Upstream
+}
+
+// generateStreamBlock generates the nginx stream block for TCP/UDP forwarding
+func generateStreamBlock(mappings []StreamMapping, httpPort, httpsPort string) string {
+	var sb strings.Builder
+	sb.WriteString("stream {\n")
+
+	// Check if we need ssl_preread (when TCP uses same port as HTTPS)
+	needSSLPreread := false
+	for _, m := range mappings {
+		if m.ListenConfig.Protocol == config.ProtocolTCP && m.ListenConfig.Port == httpsPort {
+			needSSLPreread = true
+			break
+		}
+	}
+
+	// Group mappings by listen port to detect conflicts
+	portMappings := make(map[string][]StreamMapping)
+	for _, m := range mappings {
+		key := m.ListenConfig.Port
+		if m.ListenConfig.Host != "" {
+			key = m.ListenConfig.Host + ":" + m.ListenConfig.Port
+		}
+		portMappings[key] = append(portMappings[key], m)
+	}
+
+	// Generate upstreams and servers
+	for _, m := range mappings {
+		// Generate upstream
+		upstreamName := fmt.Sprintf("stream_%s_%s", m.ListenConfig.Protocol, m.ListenConfig.Port)
+		if m.ListenConfig.Host != "" {
+			// Replace dots and colons for valid upstream name
+			hostSafe := strings.ReplaceAll(m.ListenConfig.Host, ".", "_")
+			hostSafe = strings.ReplaceAll(hostSafe, ":", "_")
+			upstreamName = fmt.Sprintf("stream_%s_%s_%s", m.ListenConfig.Protocol, hostSafe, m.ListenConfig.Port)
+		}
+
+		upstreamAddr := formatUpstreamAddr(m.Upstream)
+
+		sb.WriteString(fmt.Sprintf("    upstream %s {\n", upstreamName))
+		sb.WriteString(fmt.Sprintf("        server %s;\n", upstreamAddr))
+		sb.WriteString("    }\n\n")
+	}
+
+	// Handle ssl_preread for port 443 conflict
+	if needSSLPreread {
+		sb.WriteString("    # SSL preread for TLS/HTTPS detection on port 443\n")
+		sb.WriteString("    map $ssl_preread_protocol $backend_443 {\n")
+		sb.WriteString("        default stream_tcp_443;\n")
+		sb.WriteString("        \"TLS\"  stream_https_443;\n")
+		sb.WriteString("    }\n\n")
+
+		// Generate the ssl_preread server
+		sb.WriteString("    server {\n")
+		sb.WriteString(fmt.Sprintf("        listen %s;\n", httpsPort))
+		sb.WriteString("        ssl_preread on;\n")
+		sb.WriteString("        proxy_pass $backend_443;\n")
+		sb.WriteString("    }\n\n")
+	}
+
+	// Generate servers for each mapping
+	for _, m := range mappings {
+		// Skip the httpsPort if we're using ssl_preread
+		if needSSLPreread && m.ListenConfig.Protocol == config.ProtocolTCP && m.ListenConfig.Port == httpsPort {
+			continue
+		}
+
+		upstreamName := fmt.Sprintf("stream_%s_%s", m.ListenConfig.Protocol, m.ListenConfig.Port)
+		if m.ListenConfig.Host != "" {
+			hostSafe := strings.ReplaceAll(m.ListenConfig.Host, ".", "_")
+			hostSafe = strings.ReplaceAll(hostSafe, ":", "_")
+			upstreamName = fmt.Sprintf("stream_%s_%s_%s", m.ListenConfig.Protocol, hostSafe, m.ListenConfig.Port)
+		}
+
+		sb.WriteString("    server {\n")
+
+		// Build listen directive
+		listenAddr := m.ListenConfig.Port
+		if m.ListenConfig.Host != "" {
+			listenAddr = fmt.Sprintf("%s:%s", m.ListenConfig.Host, m.ListenConfig.Port)
+		}
+
+		if m.ListenConfig.Protocol == config.ProtocolUDP {
+			sb.WriteString(fmt.Sprintf("        listen %s udp;\n", listenAddr))
+		} else {
+			sb.WriteString(fmt.Sprintf("        listen %s;\n", listenAddr))
+		}
+
+		sb.WriteString(fmt.Sprintf("        proxy_pass %s;\n", upstreamName))
+		sb.WriteString("    }\n\n")
+	}
+
+	sb.WriteString("}\n\n")
+	return sb.String()
 }

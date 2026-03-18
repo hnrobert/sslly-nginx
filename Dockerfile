@@ -14,7 +14,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o sslly-nginx ./cmd/sslly-nginx
 
 # Runtime stage
-FROM nginx:alpine
+FROM nginx:1.28-alpine
 
 # Install required tools
 RUN apk add --no-cache ca-certificates openssl

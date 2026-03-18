@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +23,17 @@ const (
 	proxyExampleFile = "proxy.example.yaml"
 	corsExampleFile  = "cors.example.yaml"
 	logsExampleFile  = "logs.example.yaml"
+)
+
+// Protocol represents the protocol type for listen/upstream configuration
+type Protocol string
+
+const (
+	ProtocolHTTP   Protocol = "http"
+	ProtocolHTTPS  Protocol = "https"
+	ProtocolTCP    Protocol = "tcp"
+	ProtocolUDP    Protocol = "udp"
+	ProtocolStatic Protocol = "static"
 )
 
 func exampleDir() string {
@@ -63,10 +73,33 @@ type LogConfig struct {
 
 // Upstream represents a backend server configuration
 type Upstream struct {
-	Scheme string // Protocol scheme: "http" or "https" (default: "http")
-	Host   string // IP address or hostname (default: 127.0.0.1)
-	Port   string // Port number
-	Path   string // Optional path prefix for routing
+	Scheme   string   // Protocol scheme: "http" or "https" (default: "http") - legacy field, use Protocol for new code
+	Protocol Protocol // Protocol type: http, https, tcp, udp, static
+	Host     string   // IP address or hostname (default: 127.0.0.1)
+	Port     string   // Port number
+	Path     string   // Optional path prefix for routing (HTTP/HTTPS only)
+}
+
+// ListenConfig represents a listening configuration
+type ListenConfig struct {
+	Protocol Protocol // Listen protocol: http, https, tcp, udp
+	Host     string   // Listen address (empty = all interfaces)
+	Port     string   // Listen port
+}
+
+// IsHTTP returns true if the protocol is HTTP or HTTPS
+func (p Protocol) IsHTTP() bool {
+	return p == ProtocolHTTP || p == ProtocolHTTPS
+}
+
+// IsStream returns true if the protocol is TCP or UDP (stream layer)
+func (p Protocol) IsStream() bool {
+	return p == ProtocolTCP || p == ProtocolUDP
+}
+
+// IsStatic returns true if the protocol is static (file serving)
+func (p Protocol) IsStatic() bool {
+	return p == ProtocolStatic
 }
 
 type Config struct {
@@ -74,18 +107,14 @@ type Config struct {
 	CORS  map[string]CORSConfig `yaml:"cors"`
 	Ports map[string][]string   `yaml:",inline"`
 
-	// RuntimeStaticPorts marks numeric upstream ports that were generated from static-site mappings.
+	// RuntimeStaticSites stores static site information for nginx config generation.
+	// Key is the original config key (e.g., "/app/static" or "[/app/static]/route").
 	// It is runtime-only (not persisted to YAML).
-	RuntimeStaticPorts map[string]bool `yaml:"-"`
-	// RuntimeStaticHasIndex marks static-site ports whose directory contains an index.html.
-	// Used to enable SPA-style deep-link fallback in nginx.
-	RuntimeStaticHasIndex map[string]bool `yaml:"-"`
+	RuntimeStaticSites map[string]StaticSiteSpec `yaml:"-"`
 }
 
 type StaticSiteSpec struct {
-	Dir     string
-	Port    int
-	HasPort bool
+	Dir string
 	// RoutePath is an optional URL path prefix (e.g. "/home") used to build domain/path routes.
 	// It is NOT a filesystem path.
 	RoutePath string
@@ -94,97 +123,44 @@ type StaticSiteSpec struct {
 // ParseStaticSiteKey parses a proxy.yaml mapping key that represents a local static directory.
 //
 // Rules:
-//   - If the key starts with '.' or '/', it's treated as a filesystem directory.
-//   - If the key is in the form "[DIR]/route" (or "[DIR:PORT]/route"), DIR is treated as a filesystem directory
-//     and "/route" is used as the domain route prefix.
-//   - If the key ends with ':PORT' (PORT must be numeric), that port is used.
-//   - Otherwise, the app will auto-assign an available local port (starting from 10000).
+//   - Only keys starting with '/' are treated as static sites.
+//   - Use '//' to separate directory from route path: /app/static//docs
+//   - Colons ':' are treated as part of the file path (NOT as port separators).
+//   - If the key has a <protocol> prefix, it is ignored.
 func ParseStaticSiteKey(key string) (StaticSiteSpec, bool, error) {
 	k := strings.TrimSpace(strings.TrimSuffix(key, ":"))
 	if k == "" {
 		return StaticSiteSpec{}, false, nil
 	}
 
-	// Bracket syntax: [DIR]/route
-	// IMPORTANT: brackets are NOT exclusive to static-site mappings.
-	// Only treat them as static-site mappings when DIR starts with '.' or '/'.
-	if strings.HasPrefix(k, "[") {
-		close := strings.Index(k, "]")
-		if close < 0 {
-			// If it *looks* like a static mapping ("[./" or "[/"), report a helpful error.
-			if strings.HasPrefix(k, "[.") || strings.HasPrefix(k, "[/") {
-				return StaticSiteSpec{}, true, fmt.Errorf("invalid static site mapping %q: missing closing ']'", k)
-			}
-			return StaticSiteSpec{}, false, nil
+	// Check and ignore <protocol> prefix (should not be used for static sites)
+	if strings.HasPrefix(k, "<") {
+		closeIdx := strings.Index(k, ">")
+		if closeIdx > 0 {
+			k = strings.TrimSpace(k[closeIdx+1:])
 		}
-		inside := strings.TrimSpace(k[1:close])
-		if inside == "" {
-			// Treat as static mapping only when it looks like one.
-			if strings.HasPrefix(k, "[.") || strings.HasPrefix(k, "[/") {
-				return StaticSiteSpec{}, true, fmt.Errorf("invalid static site mapping %q: empty directory", k)
-			}
-			return StaticSiteSpec{}, false, nil
-		}
-		if !(strings.HasPrefix(inside, ".") || strings.HasPrefix(inside, "/")) {
-			// Not a static site mapping (e.g. [https]9143, [::1]:9000)
-			return StaticSiteSpec{}, false, nil
-		}
-
-		suffix := strings.TrimSpace(k[close+1:])
-		routePath := ""
-		if suffix != "" {
-			if !strings.HasPrefix(suffix, "/") {
-				return StaticSiteSpec{}, true, fmt.Errorf("invalid static site mapping %q: route must start with '/'", k)
-			}
-			routePath = normalizeRoutePath(suffix)
-		}
-
-		// Optional ':PORT' suffix inside the brackets.
-		if idx := strings.LastIndex(inside, ":"); idx > 0 && idx < len(inside)-1 {
-			portPart := inside[idx+1:]
-			if isNumeric(portPart) {
-				p, err := strconv.Atoi(portPart)
-				if err != nil {
-					return StaticSiteSpec{}, true, fmt.Errorf("invalid static site port %q: %w", portPart, err)
-				}
-				if p <= 0 || p > 65535 {
-					return StaticSiteSpec{}, true, fmt.Errorf("invalid static site port %d", p)
-				}
-				dir := strings.TrimSpace(inside[:idx])
-				if dir == "" {
-					return StaticSiteSpec{}, true, fmt.Errorf("invalid static site path: empty")
-				}
-				return StaticSiteSpec{Dir: dir, Port: p, HasPort: true, RoutePath: routePath}, true, nil
-			}
-		}
-
-		return StaticSiteSpec{Dir: inside, HasPort: false, RoutePath: routePath}, true, nil
 	}
 
-	if !(strings.HasPrefix(k, ".") || strings.HasPrefix(k, "/")) {
+	// Only absolute paths starting with '/' are static sites
+	if !strings.HasPrefix(k, "/") {
 		return StaticSiteSpec{}, false, nil
 	}
 
-	// Optional ':PORT' suffix.
-	if idx := strings.LastIndex(k, ":"); idx > 0 && idx < len(k)-1 {
-		portPart := k[idx+1:]
-		if isNumeric(portPart) {
-			p, err := strconv.Atoi(portPart)
-			if err != nil {
-				return StaticSiteSpec{}, true, fmt.Errorf("invalid static site port %q: %w", portPart, err)
-			}
-			if p <= 0 || p > 65535 {
-				return StaticSiteSpec{}, true, fmt.Errorf("invalid static site port %d", p)
-			}
-			dir := strings.TrimSpace(k[:idx])
-			if dir == "" {
-				return StaticSiteSpec{}, true, fmt.Errorf("invalid static site path: empty")
-			}
-			return StaticSiteSpec{Dir: dir, Port: p, HasPort: true}, true, nil
+	// Check for '//' separator (directory//route)
+	if doubleSlashIdx := strings.Index(k, "//"); doubleSlashIdx > 0 {
+		dir := k[:doubleSlashIdx]
+		routePath := k[doubleSlashIdx+2:]
+
+		if routePath == "" {
+			return StaticSiteSpec{Dir: dir, RoutePath: ""}, true, nil
 		}
+		if !strings.HasPrefix(routePath, "/") {
+			routePath = "/" + routePath
+		}
+		return StaticSiteSpec{Dir: dir, RoutePath: normalizeRoutePath(routePath)}, true, nil
 	}
 
-	return StaticSiteSpec{Dir: k, HasPort: false}, true, nil
+	return StaticSiteSpec{Dir: k}, true, nil
 }
 
 func normalizeRoutePath(p string) string {
@@ -210,18 +186,28 @@ func normalizeRoutePath(p string) string {
 // - "192.168.31.6:1234/api" -> Upstream{Scheme: "http", Host: "192.168.31.6", Port: "1234", Path: "/api"}
 // - "[::1]:9000" -> Upstream{Scheme: "http", Host: "::1", Port: "9000", Path: ""} (IPv6 format)
 // - "example-server.local:8080" -> Upstream{Scheme: "http", Host: "example-server.local", Port: "8080", Path: ""}
-// - "[https]192.168.50.2:1234" -> Upstream{Scheme: "https", Host: "192.168.50.2", Port: "1234", Path: ""}
-// - "[https]www.baidu.com" -> Upstream{Scheme: "https", Host: "www.baidu.com", Port: "443", Path: ""}
+// - "<https>192.168.50.2:1234" -> Upstream{Scheme: "https", Host: "192.168.50.2", Port: "1234", Path: ""}
+// - "<https>www.baidu.com" -> Upstream{Scheme: "https", Host: "www.baidu.com", Port: "443", Path: ""}
 // - "www.example.com" -> Upstream{Scheme: "http", Host: "www.example.com", Port: "80", Path: ""}
 func ParseUpstream(key string) Upstream {
 	// Remove trailing colon if present (for YAML keys like "192.168.31.6:1234:")
 	key = strings.TrimSuffix(key, ":")
 
-	// Check for [https] prefix
+	// Check for protocol prefix
+	// Format: <https>, <http>, <tcp>, <udp>
+	protocol := ProtocolHTTP
+	if strings.HasPrefix(key, "<") {
+		closeIdx := strings.Index(key, ">")
+		if closeIdx > 0 {
+			protoStr := strings.ToLower(key[1:closeIdx])
+			protocol = Protocol(protoStr)
+			key = strings.TrimSpace(key[closeIdx+1:])
+		}
+	}
+
 	scheme := "http"
-	if strings.HasPrefix(key, "[https]") {
+	if protocol == ProtocolHTTPS {
 		scheme = "https"
-		key = strings.TrimPrefix(key, "[https]")
 	}
 
 	// Check for path suffix (e.g., "/api")
@@ -236,10 +222,11 @@ func ParseUpstream(key string) Upstream {
 		closeBracket := strings.Index(key, "]")
 		if closeBracket > 0 && closeBracket < len(key)-1 && key[closeBracket+1] == ':' {
 			return Upstream{
-				Scheme: scheme,
-				Host:   key[1:closeBracket],
-				Port:   key[closeBracket+2:],
-				Path:   path,
+				Scheme:   scheme,
+				Protocol: protocol,
+				Host:     key[1:closeBracket],
+				Port:     key[closeBracket+2:],
+				Path:     path,
 			}
 		}
 	}
@@ -258,39 +245,43 @@ func ParseUpstream(key string) Upstream {
 			if strings.Count(key, ":") > 1 {
 				// This is likely malformed - default to treating as plain port
 				return Upstream{
-					Scheme: scheme,
-					Host:   "127.0.0.1",
-					Port:   key,
-					Path:   path,
+					Scheme:   scheme,
+					Protocol: protocol,
+					Host:     "127.0.0.1",
+					Port:     key,
+					Path:     path,
 				}
 			}
 			// Single colon at start (:8080) - treat as plain port
 			if host == "" {
 				return Upstream{
-					Scheme: scheme,
-					Host:   "127.0.0.1",
-					Port:   port,
-					Path:   path,
+					Scheme:   scheme,
+					Protocol: protocol,
+					Host:     "127.0.0.1",
+					Port:     port,
+					Path:     path,
 				}
 			}
 		}
 
 		// Valid host:port format (could be IP or hostname)
 		return Upstream{
-			Scheme: scheme,
-			Host:   host,
-			Port:   port,
-			Path:   path,
+			Scheme:   scheme,
+			Protocol: protocol,
+			Host:     host,
+			Port:     port,
+			Path:     path,
 		}
 	}
 
 	// Check if it's a pure number (port only)
 	if isNumeric(key) {
 		return Upstream{
-			Scheme: scheme,
-			Host:   "127.0.0.1",
-			Port:   key,
-			Path:   path,
+			Scheme:   scheme,
+			Protocol: protocol,
+			Host:     "127.0.0.1",
+			Port:     key,
+			Path:     path,
 		}
 	}
 
@@ -300,10 +291,11 @@ func ParseUpstream(key string) Upstream {
 		defaultPort = "443"
 	}
 	return Upstream{
-		Scheme: scheme,
-		Host:   key,
-		Port:   defaultPort,
-		Path:   path,
+		Scheme:   scheme,
+		Protocol: protocol,
+		Host:     key,
+		Port:     defaultPort,
+		Path:     path,
 	}
 }
 
@@ -314,6 +306,87 @@ func isNumeric(s string) bool {
 		}
 	}
 	return len(s) > 0
+}
+
+// ParseListenKey parses a listen key which can be:
+// - "1234" -> ListenConfig{Protocol: http, Host: "", Port: "1234"} (HTTP, listen on all interfaces)
+// - "server_name|1234" -> ListenConfig{Protocol: http, Host: "server_name", Port: "1234"}
+// - "<http>1234" -> ListenConfig{Protocol: http, Host: "", Port: "1234"} (explicit HTTP)
+// - "<https>443" -> ListenConfig{Protocol: https, Host: "", Port: "443"} (HTTPS)
+// - "<tcp>9122" -> ListenConfig{Protocol: tcp, Host: "", Port: "9122"} (TCP)
+// - "<tcp>192.168.50.1|22" -> ListenConfig{Protocol: tcp, Host: "192.168.50.1", Port: "22"} (TCP on specific IP)
+// - "<udp>9123" -> ListenConfig{Protocol: udp, Host: "", Port: "9123"} (UDP)
+// The | separator is used to split server_name and port (colon is used for IPv6 addresses)
+func ParseListenKey(key string) ListenConfig {
+	// Remove trailing colon if present (for YAML keys)
+	key = strings.TrimSuffix(key, ":")
+
+	// Default protocol is HTTP
+	protocol := ProtocolHTTP
+
+	// Check for protocol prefix <protocol>
+	if strings.HasPrefix(key, "<") {
+		closeIdx := strings.Index(key, ">")
+		if closeIdx > 0 {
+			protoStr := strings.ToLower(key[1:closeIdx])
+			protocol = Protocol(protoStr)
+			key = strings.TrimSpace(key[closeIdx+1:])
+		}
+	}
+
+	// Check for server_name|port format
+	if strings.Contains(key, "|") {
+		pipeIdx := strings.Index(key, "|")
+		host := key[:pipeIdx]
+		port := key[pipeIdx+1:]
+
+		// Handle IPv6 format [host]|port
+		if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+			host = host[1 : len(host)-1]
+		}
+
+		return ListenConfig{
+			Protocol: protocol,
+			Host:     host,
+			Port:     port,
+		}
+	}
+
+	// Just a port number (no | separator)
+	return ListenConfig{
+		Protocol: protocol,
+		Host:     "",
+		Port:     key,
+	}
+}
+
+// IsStaticSiteKey returns true if the key appears to be a static site mapping
+// (starts with '.' or '/', or uses the [dir]/route bracket syntax with a static dir)
+func IsStaticSiteKey(key string) bool {
+	k := strings.TrimSpace(key)
+
+	// Check and ignore <protocol> prefix
+	if strings.HasPrefix(k, "<") {
+		closeIdx := strings.Index(k, ">")
+		if closeIdx > 0 {
+			k = strings.TrimSpace(k[closeIdx+1:])
+		}
+	}
+
+	// Bracket syntax: [DIR]/route - only if DIR starts with '.' or '/'
+	if strings.HasPrefix(k, "[") {
+		closeIdx := strings.Index(k, "]")
+		if closeIdx > 0 {
+			inside := strings.TrimSpace(k[1:closeIdx])
+			if strings.HasPrefix(inside, ".") || strings.HasPrefix(inside, "/") {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Simple path syntax
+	return strings.HasPrefix(k, ".") || strings.HasPrefix(k, "/")
 }
 
 func Load(configDir string) (*Config, error) {
@@ -635,4 +708,197 @@ func copyFile(src, dst string) error {
 		return fmt.Errorf("failed to write %s: %w", filepath.Base(dst), err)
 	}
 	return nil
+}
+
+// MappingError represents a validation error for a proxy mapping
+type MappingError struct {
+	Key     string // The upstream_key that has the error
+	Value   string // The listener_key that has the error (if applicable)
+	Message string // Error description
+}
+
+func (e *MappingError) Error() string {
+	if e.Value != "" {
+		return fmt.Sprintf("mapping error for %q -> %q: %s", e.Key, e.Value, e.Message)
+	}
+	return fmt.Sprintf("mapping error for %q: %s", e.Key, e.Message)
+}
+
+// MappingWarning represents a validation warning for a proxy mapping
+type MappingWarning struct {
+	Key     string // The upstream_key that has the warning
+	Value   string // The listener_key that has the warning (if applicable)
+	Message string // Warning description
+}
+
+func (w *MappingWarning) String() string {
+	if w.Value != "" {
+		return fmt.Sprintf("mapping warning for %q -> %q: %s", w.Key, w.Value, w.Message)
+	}
+	return fmt.Sprintf("mapping warning for %q: %s", w.Key, w.Message)
+}
+
+// ValidateMapping validates a single proxy mapping (upstream_key -> listener_key)
+// Returns the effective listen config, any errors, and any warnings.
+//
+// Validation rules:
+// 1. listen_protocol cannot be static
+// 2. If upstream is http/https, listen can only be http or https (or auto-detect)
+// 3. If upstream is tcp/udp, listen should match (warning if same, error if different)
+// 4. Smart mode: if listen_protocol is not specified, it's inferred from upstream
+//   - tcp upstream -> tcp listen
+//   - http/https upstream -> http/https listen based on certificate availability (handled by caller)
+func ValidateMapping(upstreamKey string, listenerKey string, hasCertificate bool) (ListenConfig, []error, []*MappingWarning) {
+	var errors []error
+	var warnings []*MappingWarning
+
+	// Parse upstream
+	upstream := ParseUpstream(upstreamKey)
+
+	// Parse listener (may have explicit protocol or not)
+	listenConfig := ParseListenKey(listenerKey)
+	explicitProtocol := strings.Contains(listenerKey, "<") && strings.Contains(listenerKey, ">")
+
+	// Rule 1: listen_protocol cannot be static
+	if listenConfig.Protocol == ProtocolStatic {
+		errors = append(errors, &MappingError{
+			Key:     upstreamKey,
+			Value:   listenerKey,
+			Message: "listen_protocol cannot be 'static'; static sites are only for upstream configuration",
+		})
+		return listenConfig, errors, warnings
+	}
+
+	// Determine effective listen protocol
+	if upstream.Protocol.IsStream() {
+		// Upstream is TCP or UDP
+		if explicitProtocol {
+			// User explicitly specified listen protocol
+			if listenConfig.Protocol != upstream.Protocol {
+				// Different protocol - this is an error
+				errors = append(errors, &MappingError{
+					Key:     upstreamKey,
+					Value:   listenerKey,
+					Message: fmt.Sprintf("listen_protocol '%s' does not match upstream protocol '%s'; this mapping will be ignored", listenConfig.Protocol, upstream.Protocol),
+				})
+				return listenConfig, errors, warnings
+			}
+			// Same protocol - redundant but allowed (warning)
+			warnings = append(warnings, &MappingWarning{
+				Key:     upstreamKey,
+				Value:   listenerKey,
+				Message: fmt.Sprintf("explicit listen_protocol '%s' is redundant when upstream is also '%s'; you can omit the <protocol> prefix", listenConfig.Protocol, upstream.Protocol),
+			})
+		} else {
+			// Smart mode: use upstream protocol
+			listenConfig.Protocol = upstream.Protocol
+		}
+	} else if upstream.Protocol.IsHTTP() || upstream.Protocol == ProtocolStatic {
+		// Upstream is HTTP, HTTPS, or Static
+		if explicitProtocol {
+			// User explicitly specified listen protocol
+			if !listenConfig.Protocol.IsHTTP() {
+				// Non-HTTP listen for HTTP/HTTPS/Static upstream - error
+				errors = append(errors, &MappingError{
+					Key:     upstreamKey,
+					Value:   listenerKey,
+					Message: fmt.Sprintf("listen_protocol '%s' is not compatible with upstream protocol '%s'; only http/https are allowed", listenConfig.Protocol, upstream.Protocol),
+				})
+				return listenConfig, errors, warnings
+			}
+			// Explicit http/https is allowed
+		} else {
+			// Smart mode: determine based on certificate
+			// If has certificate or upstream is https -> https
+			// Otherwise -> http
+			if hasCertificate || upstream.Protocol == ProtocolHTTPS {
+				listenConfig.Protocol = ProtocolHTTPS
+			} else {
+				listenConfig.Protocol = ProtocolHTTP
+			}
+		}
+	}
+
+	return listenConfig, errors, warnings
+}
+
+// ValidatedMapping represents a validated proxy mapping
+type ValidatedMapping struct {
+	UpstreamKey  string
+	ListenerKey  string
+	Upstream     Upstream
+	ListenConfig ListenConfig
+	Errors       []error
+	Warnings     []*MappingWarning
+}
+
+// ValidateConfig validates all proxy mappings in the config.
+// Returns validated mappings (including those with errors for logging),
+// and a boolean indicating if there were any fatal errors.
+//
+// Mappings with errors are excluded from the returned slice,
+// but their errors are collected for reporting.
+func ValidateConfig(cfg *Config, certMap map[string]bool) ([]ValidatedMapping, []error, []*MappingWarning) {
+	var validMappings []ValidatedMapping
+	var allErrors []error
+	var allWarnings []*MappingWarning
+
+	for upstreamKey, listenerKeys := range cfg.Ports {
+		// Skip static site keys - they are handled separately
+		if IsStaticSiteKey(upstreamKey) {
+			continue
+		}
+
+		// For TCP/UDP upstreams, the listenerKeys are actually upstream targets
+		// We need to check if this is a stream mapping
+		upstream := ParseUpstream(upstreamKey)
+		if upstream.Protocol.IsStream() {
+			// Stream mapping: upstreamKey is the listen side, listenerKeys are targets
+			for _, targetKey := range listenerKeys {
+				listenConfig, errors, warnings := ValidateMapping(upstreamKey, targetKey, false)
+				mapping := ValidatedMapping{
+					UpstreamKey:  upstreamKey,
+					ListenerKey:  targetKey,
+					Upstream:     upstream,
+					ListenConfig: listenConfig,
+					Errors:       errors,
+					Warnings:     warnings,
+				}
+				allErrors = append(allErrors, errors...)
+				allWarnings = append(allWarnings, warnings...)
+
+				if len(errors) == 0 {
+					validMappings = append(validMappings, mapping)
+				}
+			}
+		} else {
+			// HTTP/HTTPS/Static mapping: upstreamKey is the target, listenerKeys are domains
+			for _, listenerKey := range listenerKeys {
+				// Extract domain from listenerKey to check certificate
+				domain := listenerKey
+				if idx := strings.Index(listenerKey, "/"); idx > 0 {
+					domain = listenerKey[:idx]
+				}
+				hasCert := certMap[domain]
+
+				listenConfig, errors, warnings := ValidateMapping(upstreamKey, listenerKey, hasCert)
+				mapping := ValidatedMapping{
+					UpstreamKey:  upstreamKey,
+					ListenerKey:  listenerKey,
+					Upstream:     upstream,
+					ListenConfig: listenConfig,
+					Errors:       errors,
+					Warnings:     warnings,
+				}
+				allErrors = append(allErrors, errors...)
+				allWarnings = append(allWarnings, warnings...)
+
+				if len(errors) == 0 {
+					validMappings = append(validMappings, mapping)
+				}
+			}
+		}
+	}
+
+	return validMappings, allErrors, allWarnings
 }

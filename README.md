@@ -2,168 +2,172 @@
 
 A smart Nginx SSL reverse proxy manager that automatically configures SSL certificates and proxies traffic to your local applications.
 
+> I HATE writing Nginx config, that's why this project was born.  
+> Just tell this tool the port and domain, and let it handle the rest.  
+> <p align="right"><strong>Robert He</strong></p>
+
 ![logo](assets/images/logo.png)
 
 ## Features
 
-- 🔄 **Automatic Configuration**: Watches for configuration and SSL certificate changes and automatically reloads Nginx
-- 🔒 **SSL Management**: Automatically scans and maps SSL certificates to domains
-- 🔁 **Hot Reload**: Updates Nginx configuration without downtime when files change
-- 🛡️ **Error Recovery**: Maintains the last working configuration and rolls back on failures
-- 🐳 **Docker Ready**: Runs as a containerized service with Docker Compose
-- 🌐 **FRP Integration**: Easy integration with FRP for secure remote access to local services
-- 🚀 **CI/CD Pipeline**: Includes GitHub Actions workflows for testing, building, and releasing
+- **Simple Rules**: Just map port to domains in a YAML file, no more Nginx config writing
+- **Automatic Configuration**: Watches for configuration and SSL certificate change, automatically reloads Nginx
+- **SSL Management**: Automatically scans and maps SSL certificates to domains
+- **Hot Reload**: Updates Nginx configuration without downtime when files change
+- **Error Recovery**: Maintains the last working configuration and rolls back on failures
+- **Docker Ready**: Runs as a containerized service with Docker Compose
+- **FRP Friendly**: Easy integration with FRP for secure remote access to local services
 
-## How It Works
+### Supported Features
 
-`sslly-nginx` is a Go application that runs inside an Nginx Alpine container and manages the Nginx configuration dynamically:
-
-1. **Configuration Monitoring**: Watches `./configs/proxy.yaml` (and optional `./configs/cors.yaml` / `./configs/logs.yaml`) for changes
-2. **Certificate Scanning**: Recursively scans `./ssl` directory for certificate files
-3. **Nginx Generation**: Generates Nginx configuration based on port-to-domain mappings
-4. **Health Checks**: Verifies Nginx health after each reload
-5. **Rollback Protection**: Maintains last working configuration for automatic recovery
+- [x] HTTP and HTTPS proxying
+- [x] Automatic HTTP → HTTPS redirection for domains with valid certificates
+- [x] TCP and UDP stream forwarding
+- [x] CORS configuration (optional)
+- [x] Custom log levels and formats (optional)
+- [x] WebSocket support
+- [x] Static site hosting
 
 ## Quick Start
 
-For a quick start & deployment guide, see [docs/QUICKSTART.md](docs/QUICKSTART.md).
+### One-Command Setup
+
+```bash
+# Set up working directory
+export SSLLY_NGINX_HOME=$HOME/sslly-nginx
+mkdir -p $SSLLY_NGINX_HOME && cd $SSLLY_NGINX_HOME
+
+# Download Docker Compose configuration
+curl -fsSL https://raw.githubusercontent.com/hnrobert/sslly-nginx/main/docker-compose.yml -o docker-compose.yml
+
+# Start the service
+docker-compose up -d
+```
+
+The service will start with default configuration and create `configs/` and `ssl/` directories.
+
+### Customize Configuration
+
+Edit `configs/proxy.yaml` to add your routes:
+
+```bash
+# View logs
+docker-compose logs -f
+
+# Stop service
+docker-compose down
+```
+
+### Add SSL Certificates
+
+Drop certificate files into the `ssl/` directory:
+
+```text
+ssl/
+├── example.com.crt
+├── example.com.key
+└── api.example.com_bundle.crt
+```
 
 ## Documentation
 
-- [Quick Start Guide](docs/QUICKSTART.md) - Get started with installation and deployment
+- [Configuration Reference](docs/CONFIG_REFERENCE.md) - Complete configuration format and rules
 - [CORS Configuration](docs/CORS.md) - Comprehensive CORS setup and best practices
 - [FRP Integration](docs/FRP.md) - Set up FRP for remote access to local services
 
 ## Configuration
 
-### Application Configuration
+### Configuration Format Summary
 
-The proxy configuration file (`configs/proxy.yaml`) maps upstream addresses to domain names. Optional features live in `configs/cors.yaml` and `configs/logs.yaml`.
+```yaml
+upstream_key:
+  - listener_key_1
+  - listener_key_2
+```
 
-#### CORS Configuration (Optional)
+### upstream_key Format
+
+```md
+<upstream_protocol>domain:port/routes
+```
+
+or for static sites:
+
+```md
+static_route//additional/routes
+```
+
+| Component | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `upstream_protocol` | No | `http` | `https`, `tcp`, `udp` (omit for `http`) |
+| `domain` | No | `127.0.0.1` | IP or hostname (IPv6: `[::1]`) |
+| `port` | No | Protocol default | Port number |
+| `routes` | No | - | URL path routing |
+| `static_route` | - | - | Path representing www root location in filesystem starting with `/` or `.` or `..` (`.` = `/app`) |
+
+### listener_key Format
+
+```md
+<listen_protocol>listened_server_name|listened_port
+```
+
+| Component | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `listen_protocol` | No | Smart mode | `http`, `https`, `tcp`, `udp` |
+| `listened_server_name` | No | All interfaces | Server name (domain) |
+| `listened_port` | No | Env var ports | Listen port |
+
+### Quick Examples
+
+```yaml
+# HTTP proxy to localhost:8080
+8080:
+  - example.com
+
+# HTTPS upstream
+<https>api.secure.com:
+  - example.com
+
+# TCP forwarding
+<tcp>9122:
+  - 8122
+
+# Static site (relative path, . = /app)
+./static:
+  - static.example.com
+
+# Static site (parent path, .. = /)
+../data:
+  - data.example.com
+
+# Static with route path (using //)
+/app/static//docs:
+  - docs.example.com
+```
+
+For complete format specification and advanced examples, see [Configuration Reference](docs/CONFIG_REFERENCE.md).
+
+### Optional Configuration Files
+
+#### CORS Configuration
 
 Configure CORS (Cross-Origin Resource Sharing) settings globally or per-domain.
 
 ```yaml
-# You can also configure CORS for specific domains:
-'api.example.com':
+api.example.com:
   allow_origin: 'https://app.example.com'
   allow_methods: [GET, POST, PUT, DELETE, OPTIONS]
   allow_headers: [Content-Type, Authorization]
   allow_credentials: true
 ```
 
-For more please check [CORS Configuration](docs/CORS.md) for comprehensive CORS setup guide and best practices examples
-
-#### Basic Port Mapping Formats
-
-##### Format 1: Port Only (Default to localhost)
-
-```yaml
-# Proxies to 127.0.0.1:port
-1234:
-  - example.com
-  - www.example.com
-5678:
-  - api.example.com
-```
-
-##### Format 2: IP:Port (Proxy to specific IP)
-
-```yaml
-# Proxies to 192.168.31.6:1234
-192.168.31.6:1234:
-  - lan.example.com
-  - local.example.com
-```
-
-##### Format 3: Hostname:Port
-
-```yaml
-# Proxies to example-server.local:8080
-example-server.local:8080:
-  - remote.example.com
-```
-
-##### Format 4: IPv6 with Brackets
-
-```yaml
-# Proxies to IPv6 address 2001:db8::1 port 3000
-'[2001:db8::1]:3000':
-  - ipv6.example.com
-```
-
-##### Format 5: HTTPS Backend (Use `[https]` prefix)
-
-```yaml
-# Proxies to HTTPS backend (prevents "plain HTTP to HTTPS port" errors)
-'[https]192.168.50.2:8443':
-  - secure-backend.example.com
-```
-
-**Note:** By default, sslly-nginx forwards requests to upstream servers using HTTP. Use the `[https]` prefix when your upstream server expects HTTPS connections to avoid "400 Bad Request - The plain HTTP request was sent to HTTPS port" errors.
-
-#### Advanced: Path-based Routing
-
-Route different paths of the same domain to different backends:
-
-```yaml
-# Main site on port 9012
-9012:
-  - shared.example.com
-
-# API endpoints on different server
-192.168.50.2:5678/api:
-  - shared.example.com/api
-```
-
-This generates Nginx configuration with location-based routing:
-
-- `shared.example.com/api` → `192.168.50.2:5678/api`
-- `shared.example.com/` → `127.0.0.1:9012`
-
-**Configuration Key Formats Summary:**
-
-- `port` → Proxies to `127.0.0.1:port` via HTTP (default)
-- `ip:port` → Proxies to `ip:port` via HTTP
-- `hostname:port` → Proxies to `hostname:port` via HTTP
-- `[ipv6]:port` → Proxies to IPv6 address with brackets via HTTP
-- `[https]upstream` → Proxies to upstream via HTTPS (prevents "plain HTTP to HTTPS port" errors)
-  - Example: `[https]192.168.50.2:8443` forwards requests using HTTPS
-- `upstream/path` → Adds path routing to the upstream
-  - Example: `192.168.50.2:5678/api` proxies `/api` requests to that backend
-
-#### Static Site: Serve a Directory
-
-You can serve a local directory as a static website by using a path key (starts with `.` or `/`) in `configs/proxy.yaml`.
-
-```yaml
-# Auto-assign an available local port starting from 10000
-/app/static:
-  - static.example.com
-
-# Or pin a specific local port (if the port is in use, this entry will error and others continue)
-./static:10080:
-  - docs.example.com
-
-# Route prefix shortcut: serve /home from this directory
-"[/app/static/site1]/home":
-  - yourdomain.com
-```
-
-Notes:
-
-- Default `docker-compose.yml` mounts `./static` to `/app/static`.
-- If you omit the `:PORT` suffix, sslly-nginx will auto-pick a free port starting from `10000` and log it (including in the domain summary destinations).
-- The bracket form `"[DIR]/route"` is a shortcut for writing `yourdomain.com/route` in the domain list.
+For more please check [CORS Configuration](docs/CORS.md) for comprehensive CORS setup guide and best practices examples.
 
 ### SSL Certificate Structure
 
-Place SSL certificates in the `ssl/` directory. The application automatically matches certificate files (`.crt`) with their corresponding private key files (`.key`) based on the domain information contained within the SSL certificates.
+Place SSL certificates in the `ssl/` directory. The application automatically matches certificate files (`.crt`) with their corresponding private key files (`.key`) based on the domain information contained within the SSL certificates themselves.
 
-You can organize certificates in subdirectories:
-
-```tree
+```bash
 ssl/
 ├── production/
 │   ├── example.com_bundle.crt
@@ -177,10 +181,9 @@ ssl/
 
 **Important Notes**:
 
-- Duplicate certificates are allowed. For each domain, only certificate+private-key pairs are considered valid; if multiple pairs match, the certificate with the farthest expiration time is selected (ties prefer `.pem` over `.crt`)
+- Duplicate certificates are allowed for each domain, If multiple pairs of certificate+key are found, the farthest expiration time is selected.
 - Certificate and key files are optional (a domain without a matched cert/key will be served over HTTP)
-- The application reads the domain information from the certificate content itself and matches it with the corresponding key file
-- **SSL certificates are optional**: If no certificate is found for a domain, the service will proxy HTTP traffic directly
+- **SSL certificates are optional**: If no certificate is found for a domain, the service will proxy HTTP traffic directly to your applications
 - **HTTPS to HTTP redirect**: If HTTPS is accessed for domains without valid certificates, traffic is redirected to HTTP (301)
 
 ### Backup & Crash Recovery
@@ -189,12 +192,13 @@ To make hot-reloads safer, `sslly-nginx` keeps a persistent on-disk snapshot of 
 
 - Backup folder: `configs/.sslly-backups/`
 - Snapshot content: `configs/` + `ssl/` + generated `/etc/nginx/nginx.conf`
-- Runtime cache: the currently used cert/key files are copied into `configs/.sslly-runtime/current/` and `nginx.conf` only references that cache, so edits under `ssl/` won't affect the running nginx process until a successful reload
-- Crash detection: if the previous run died mid-reload, the next start detects an unfinished reload and automatically restores the last known-good snapshot
+- Runtime cache: The currently used cert/key files are copied into `configs/.sslly-runtime/current/` and nginx.conf only references that cache, so edits under `ssl/` won't affect the running nginx process until a successful reload.
+
+Crash detection: If the previous run died mid-reload, the next start detects the unfinished reload and automatically restores the last known-good snapshot.
 
 ### HTTP-Only Mode
 
-If you don't have SSL certificates yet or want to serve some domains over HTTP only:
+If you don't have SSL certificates yet but want to serve some domains over HTTP only:
 
 1. The application will automatically detect missing certificates
 2. Domains without certificates will be served over HTTP (no redirect)
@@ -219,14 +223,13 @@ When SSL certificates are detected:
 
 - All HTTP traffic for domains **with certificates** is automatically redirected to HTTPS
 - HTTPS traffic for domains **without certificates** is redirected to HTTP (301) to avoid certificate errors
-
-If no certificates are found for any domain, HTTP traffic is proxied directly to your applications.
+- If no certificates are found for any domain, HTTP traffic is proxied directly to your applications
 
 ### Hot Reload
 
 The application watches for changes in:
 
-- Configuration files (`./configs/proxy.yaml`, and optional `./configs/cors.yaml` / `./configs/logs.yaml`)
+- Configuration files (`./configs/proxy.yaml`, optional `./configs/cors.yaml`, `./configs/logs.yaml`)
 - SSL certificates (`./ssl/**/*`)
 
 Note: internal state folders under `configs/` (like `configs/.sslly-backups/` and `configs/.sslly-runtime/`) are ignored by the watcher to avoid feedback loops.
@@ -236,31 +239,16 @@ When changes are detected:
 1. New configuration is generated
 2. Nginx configuration is tested
 3. If valid, Nginx is reloaded
-4. If invalid, the previous working configuration is restored (including the on-disk `configs/` + `ssl/` contents)
+4. If invalid, the previous working configuration is restored (including on-disk `configs/` + `ssl/` contents)
 
 ### Logs: Domain Summary
 
-On startup and after every successful reload, the service prints a single domain summary instead of logging domain status one-by-one.
+On startup and after every successful reload, the service prints a single domain summary instead of logging domain status one-by-one:
 
-- `Matched:` (INFO) domains with a valid certificate+key and the certificate is not expired
+- `Matched:` (INFO) domains with a valid certificate+key pair (labeled "SSL")
 - `No-cert:` (WARN) domains with no matched certificate+key (served over HTTP)
-- `Expired:` (WARN) domains with a matched certificate+key, but the certificate is expired
-- `Multi-certs:` (WARN) domains where multiple certificate candidates were found; the selected certificate path is shown along with the ignored count
-
-Domains inside each block are sorted by comparing labels from TLD to left (e.g. compare `de` before `abc` in `abc.de`), and each label is compared by Unicode order. If all compared labels match, the shorter domain sorts first.
-
-Each domain line also prints its upstream destination(s) in the form `domain -> scheme://host:port[/path]`.
-
-Example order:
-
-```text
-abc.az
-abc.de
-abc.abc.de
-aad.def
-abc.def
-abc.abc.def
-```
+- `Expired:` (WARN) domains with a matched certificate+key but the certificate is expired
+- `Multi-certs:` (WARN) domains where multiple certificate candidates were found; the selected cert path is shown along with the ignored count.
 
 ### Error Handling
 
@@ -334,9 +322,11 @@ These settings work well with applications like:
 
    ```yaml
    environment:
-     - SSL_NGINX_HTTP_PORT=9980 # HTTP traffic
-     - SSL_NGINX_HTTPS_PORT=9943 # HTTPS traffic
+     - SSLLY_DEFAULT_HTTP_LISTEN_PORT=9980 # HTTP traffic
+     - SSLLY_DEFAULT_HTTPS_LISTEN_PORT=9943 # HTTPS traffic
    ```
+
+   > **Note:** The legacy environment variables `SSL_NGINX_HTTP_PORT` and `SSL_NGINX_HTTPS_PORT` are also supported for backward compatibility.
 
 2. **Setup FRP Client**: Create `frpc.toml`:
 
@@ -452,8 +442,10 @@ The `docker-compose.yml` is configured with:
 
 ### Environment Variables
 
-- `SSL_NGINX_HTTP_PORT` (default: `80`) — port Nginx listens for HTTP and redirect to HTTPS
-- `SSL_NGINX_HTTPS_PORT` (default: `443`) — port Nginx listens for HTTPS
+- `SSLLY_DEFAULT_HTTP_LISTEN_PORT` (default: `80`) — port Nginx listens for HTTP and redirect to HTTPS
+- `SSLLY_DEFAULT_HTTPS_LISTEN_PORT` (default: `443`) — port Nginx listens for HTTPS
+
+> **Note:** The legacy environment variables `SSL_NGINX_HTTP_PORT` and `SSL_NGINX_HTTPS_PORT` are still supported for backward compatibility but are deprecated.
 
 ### Viewing Logs
 
@@ -474,7 +466,7 @@ Nginx access and error logs are automatically forwarded to stdout/stderr and vis
 
 ## Project Structure
 
-```tree
+```bash
 sslly-nginx/
 ├── cmd/
 │   └── sslly-nginx/
@@ -572,4 +564,3 @@ See [LICENSE](LICENSE) file for details.
 ## Support
 
 For issues and questions, please use the [GitHub Issues](https://github.com/hnrobert/sslly-nginx/issues) page.
-A nginx container with automatic ssl handling

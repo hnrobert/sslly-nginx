@@ -78,6 +78,68 @@ func TestWatcher_SkipsInternalDirs(t *testing.T) {
 	}
 }
 
+func TestWatcher_AddsNewDirectoriesRecursively(t *testing.T) {
+	tmp := t.TempDir()
+
+	w, err := New(tmp)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer w.Stop()
+
+	// Create nested directories after watcher startup.
+	nestedDir := filepath.Join(tmp, "live", "tenant-a")
+	if err := os.MkdirAll(nestedDir, 0755); err != nil {
+		t.Fatalf("mkdir nested: %v", err)
+	}
+
+	// Give the watcher a brief moment to receive/create and register new dirs.
+	time.Sleep(50 * time.Millisecond)
+
+	// Write a file under the newly created nested directory; this should be observed.
+	nestedFile := filepath.Join(nestedDir, "cert.pem")
+	if err := os.WriteFile(nestedFile, []byte("dummy cert"), 0644); err != nil {
+		t.Fatalf("write nested file: %v", err)
+	}
+
+	if err := waitForEventOnPath(w.Events, w.Errors, nestedFile, 2*time.Second); err != nil {
+		t.Fatalf("expected event for %s: %v", nestedFile, err)
+	}
+}
+
+func TestWatcher_DeleteEventInNewNestedDirectory(t *testing.T) {
+	tmp := t.TempDir()
+
+	w, err := New(tmp)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer w.Stop()
+
+	nestedDir := filepath.Join(tmp, "delete-live", "tenant-b")
+	if err := os.MkdirAll(nestedDir, 0755); err != nil {
+		t.Fatalf("mkdir nested: %v", err)
+	}
+
+	// Allow watcher loop time to process mkdir events and attach new watches.
+	time.Sleep(120 * time.Millisecond)
+
+	nestedFile := filepath.Join(nestedDir, "cert.key")
+	if err := os.WriteFile(nestedFile, []byte("dummy key"), 0644); err != nil {
+		t.Fatalf("write nested file: %v", err)
+	}
+	if err := waitForEventOnPath(w.Events, w.Errors, nestedFile, 2*time.Second); err != nil {
+		t.Fatalf("expected create/write event for %s: %v", nestedFile, err)
+	}
+
+	if err := os.Remove(nestedFile); err != nil {
+		t.Fatalf("remove nested file: %v", err)
+	}
+	if err := waitForEventOnPathWithOp(w.Events, w.Errors, nestedFile, fsnotify.Remove, 2*time.Second); err != nil {
+		t.Fatalf("expected remove event for %s: %v", nestedFile, err)
+	}
+}
+
 func waitForEventOnPath(events <-chan fsnotify.Event, errors <-chan error, path string, timeout time.Duration) error {
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
@@ -85,6 +147,23 @@ func waitForEventOnPath(events <-chan fsnotify.Event, errors <-chan error, path 
 		select {
 		case ev := <-events:
 			if ev.Name == path {
+				return nil
+			}
+		case err := <-errors:
+			return err
+		case <-timer.C:
+			return os.ErrDeadlineExceeded
+		}
+	}
+}
+
+func waitForEventOnPathWithOp(events <-chan fsnotify.Event, errors <-chan error, path string, op fsnotify.Op, timeout time.Duration) error {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for {
+		select {
+		case ev := <-events:
+			if ev.Name == path && ev.Op&op == op {
 				return nil
 			}
 		case err := <-errors:

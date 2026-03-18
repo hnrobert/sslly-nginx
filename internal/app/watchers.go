@@ -47,7 +47,8 @@ func (a *App) setupWatchers() error {
 				if event.Op&fsnotify.Write == fsnotify.Write ||
 					event.Op&fsnotify.Create == fsnotify.Create ||
 					event.Op&fsnotify.Rename == fsnotify.Rename ||
-					event.Op&fsnotify.Remove == fsnotify.Remove {
+					event.Op&fsnotify.Remove == fsnotify.Remove ||
+					event.Op&fsnotify.Chmod == fsnotify.Chmod {
 					logger.Info("Config file changed: %s", event.Name)
 					a.scheduleReload()
 				}
@@ -70,7 +71,9 @@ func (a *App) setupWatchers() error {
 				}
 				if event.Op&fsnotify.Write == fsnotify.Write ||
 					event.Op&fsnotify.Create == fsnotify.Create ||
-					event.Op&fsnotify.Remove == fsnotify.Remove {
+					event.Op&fsnotify.Rename == fsnotify.Rename ||
+					event.Op&fsnotify.Remove == fsnotify.Remove ||
+					event.Op&fsnotify.Chmod == fsnotify.Chmod {
 					logger.Info("SSL file changed: %s", event.Name)
 					a.scheduleReload()
 				}

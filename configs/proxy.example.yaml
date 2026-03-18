@@ -1,70 +1,104 @@
-# Example proxy mapping configuration for sslly-nginx
+# sslly-nginx Proxy Configuration
 # Copy this file to proxy.yaml and modify according to your needs
+#
+# Format: upstream_key: [listener_key1, listener_key2, ...]
+#
+# See docs/CONFIG_REFERENCE.md for detailed format specification
 
-# Proxy Mapping Configuration
-# Format Options:
-# 1. port: [domains]              - Proxies to localhost:port (127.0.0.1:port) via HTTP
-# 2. ip:port: [domains]           - Proxies to specified ip:port via HTTP
-# 3. hostname:port: [domains]     - Proxies to specified hostname:port via HTTP
-# 4. [ipv6]:port: [domains]       - Proxies to IPv6 address with brackets via HTTP
-# 5. [https]upstream: [domains]   - Proxies to upstream via HTTPS (prevents "plain HTTP to HTTPS port" errors)
-# 6. ./dir or /abs/dir: [domains] - Serves a local directory as a static site (auto-assigns an available port from 10000)
-# 7. ./dir:port: [domains]        - Serves a local directory as a static site on a fixed local port
-# 8. [./dir]/route: [domains]      - Serves a local directory on a specific URL route (auto-assigns port)
-# 9. [./dir:port]/route: [domains] - Serves a local directory on a specific URL route (fixed port)
+# =============================================================================
+# HTTP/HTTPS Proxy (default protocol is http)
+# =============================================================================
 
-# Example 1: Proxy to localhost (default)
+# Format 1: Port only (proxies to 127.0.0.1:port)
 1234:
   - yourdomain.com
   - www.yourdomain.com
-# 5678:
-#   - sub.yourdomain.com
 
-# Example 2: Proxy to another machine on LAN
+# Format 2: IP:port (proxies to specific IP)
 # 192.168.50.2:1234:
 #   - lan.example.com
 
-# Example 3: Proxy to a named host
+# Format 3: Hostname:port
 # example-server.local:8080:
 #   - remote.example.com
 
-# Example 4: Proxy to IPv6 address (use "[ipv6:with:brackets]:port")
+# Format 4: IPv6 with brackets
 # "[2001:db8::1]:3000":
 #   - ipv6.example.com
 
-# Example 5: Proxy to HTTPS backend (use [https] prefix)
-# This prevents "400 Bad Request - The plain HTTP request was sent to HTTPS port" errors
-# "[https]192.168.50.2:8443":
+# Format 5: HTTPS upstream (use <https> prefix for HTTPS backends)
+# This prevents "400 Bad Request - plain HTTP request sent to HTTPS port" errors
+# "<https>192.168.50.2:8443":
 #   - secure-backend.example.com
 
-# Example 6: Shared Domain with different routes
+# Format 6: Path-based routing (multiple backends on same domain)
 # 9012:
 #   - shared.example.com
-#
-# 192.168.50.2:3456/api:
+# 192.168.50.2:5678/api:
 #   - shared.example.com/api
 
-# Example 7: Static site from a directory (auto port)
-# Notes:
-# - If the key starts with '.' or '/', sslly-nginx treats it as a directory path.
-# - If you don't specify a port, sslly-nginx will pick an available one starting from 10000.
-# - Default docker-compose mounts ./static -> /app/static
-#
+# =============================================================================
+# TCP/UDP Stream Forwarding
+# =============================================================================
+
+# TCP forwarding - listen on port 9122, forward to localhost:8122
+# <tcp>9122:
+#   - 8122
+
+# TCP forwarding to specific host
+# <tcp>9122:
+#   - 192.168.50.1|22
+
+# UDP forwarding
+# <udp>9123:
+#   - 8123
+
+# TCP on port 443 (ssl_preread enabled automatically)
+# <tcp>443:
+#   - 192.168.50.1|22
+
+# =============================================================================
+# Static Sites (directory serving)
+# =============================================================================
+
+# Simple directory (serves files at root)
 # /app/static:
 #   - static.example.com
 
-# Example 8: Static site from a directory (fixed port)
-# If the port is already in use, sslly-nginx will log an error for this entry and continue loading others.
-#
-# ./static:10080:
-#   - docs.example.com
+# Directory with multiple URL paths
+# /app/static/docs:
+#   - example.com/api
+#   - example.com/guide
+#   - example.com/docs
 
-# Example 9: Static directory with a route prefix
-# This is a shortcut for writing the route in the domain list.
-#
-# "[/app/static/site1]/home":
+# Directory with explicit route path (using // separator)
+# /app/static//home:
 #   - yourdomain.com
-#
-# Equivalent to:
-# /app/static/site1:
-#   - yourdomain.com/home
+
+# Directory with colon in path (colon is NOT port separator)
+# "/app/static:v2":
+#   - v2.example.com
+
+# =============================================================================
+# Listener Configuration Examples
+# =============================================================================
+
+# Default listener (smart mode - http/https based on certificate)
+# 8080:
+#   - example.com
+
+# Explicit HTTP listener
+# 8080:
+#   - <http>example.com
+
+# Explicit HTTPS listener (ignores certificate status)
+# 8080:
+#   - <https>example.com
+
+# Listener with custom port
+# 8080:
+#   - example.com|8443
+
+# Listener with server name and port
+# 8080:
+#   - api.example.com|8443

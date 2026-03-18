@@ -21,9 +21,11 @@ Edit your `docker-compose.yml` to use non-standard ports (avoid conflicts with F
 services:
   sslly-nginx:
     environment:
-      - SSL_NGINX_HTTP_PORT=9980 # HTTP traffic port
-      - SSL_NGINX_HTTPS_PORT=9943 # HTTPS traffic port
+      - SSLLY_DEFAULT_HTTP_LISTEN_PORT=9980 # HTTP traffic port
+      - SSLLY_DEFAULT_HTTPS_LISTEN_PORT=9943 # HTTPS traffic port
 ```
+
+> **Note:** The legacy environment variables `SSL_NGINX_HTTP_PORT` and `SSL_NGINX_HTTPS_PORT` are also supported for backward compatibility.
 
 ### 2. FRP Client Configuration
 
@@ -135,7 +137,7 @@ Run different environments on different ports:
 
 ### Port Conflicts
 
-If you encounter port conflicts, change the `SSL_NGINX_HTTP_PORT` and `SSL_NGINX_HTTPS_PORT` values in docker-compose.yml.
+If you encounter port conflicts, change the `SSLLY_DEFAULT_HTTP_LISTEN_PORT` and `SSLLY_DEFAULT_HTTPS_LISTEN_PORT` values in docker-compose.yml.
 
 ### FRP Connection Issues
 
