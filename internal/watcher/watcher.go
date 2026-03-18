@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/fsnotify/fsnotify"
 )
@@ -13,6 +14,9 @@ type Watcher struct {
 	Events  chan fsnotify.Event
 	Errors  chan error
 	done    chan struct{}
+
+	mu          sync.Mutex
+	watchedDirs map[string]struct{}
 }
 
 func New(dir string) (*Watcher, error) {
@@ -26,6 +30,7 @@ func New(dir string) (*Watcher, error) {
 		Events:  make(chan fsnotify.Event, 64),
 		Errors:  make(chan error, 16),
 		done:    make(chan struct{}),
+		watchedDirs: make(map[string]struct{}),
 	}
 
 	// Add directory and all subdirectories
@@ -43,18 +48,7 @@ func New(dir string) (*Watcher, error) {
 				if !ok {
 					return
 				}
-				// fsnotify does not automatically watch directories created after startup.
-				// If a new directory is created under a watched path, add it
-				if event.Op&fsnotify.Create == fsnotify.Create {
-					if info, statErr := os.Stat(event.Name); statErr == nil && info.IsDir() {
-						if addErr := w.addRecursive(event.Name); addErr != nil {
-							select {
-							case w.Errors <- addErr:
-							default:
-							}
-						}
-					}
-				}
+				w.maybeAddNewDirWatches(event)
 				w.Events <- event
 			case err, ok := <-watcher.Errors:
 				if !ok {
@@ -78,7 +72,7 @@ func (w *Watcher) addRecursive(dir string) error {
 			if shouldSkipWatchDir(path) {
 				return filepath.SkipDir
 			}
-			if err := w.watcher.Add(path); err != nil {
+			if err := w.addWatchDir(path); err != nil {
 				return err
 			}
 			// logger.Info("Watching directory: %s", path)
@@ -86,6 +80,49 @@ func (w *Watcher) addRecursive(dir string) error {
 
 		return nil
 	})
+}
+
+func (w *Watcher) maybeAddNewDirWatches(event fsnotify.Event) {
+	if event.Op&fsnotify.Create != fsnotify.Create &&
+		event.Op&fsnotify.Write != fsnotify.Write &&
+		event.Op&fsnotify.Chmod != fsnotify.Chmod &&
+		event.Op&fsnotify.Rename != fsnotify.Rename {
+		return
+	}
+
+	info, err := os.Stat(event.Name)
+	if err != nil || !info.IsDir() {
+		return
+	}
+
+	if err := w.addRecursive(event.Name); err != nil {
+		select {
+		case w.Errors <- err:
+		default:
+		}
+	}
+}
+
+func (w *Watcher) addWatchDir(path string) error {
+	// deduplicate	
+	clean := filepath.Clean(path)
+
+	w.mu.Lock()
+	if _, exists := w.watchedDirs[clean]; exists {
+		w.mu.Unlock()
+		return nil
+	}
+	w.mu.Unlock()
+
+	if err := w.watcher.Add(clean); err != nil {
+		return err
+	}
+
+	w.mu.Lock()
+	w.watchedDirs[clean] = struct{}{}
+	w.mu.Unlock()
+
+	return nil
 }
 
 func (w *Watcher) Stop() {
