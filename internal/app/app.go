@@ -61,6 +61,9 @@ func (a *App) Start() error {
 	if err := ensureDirWritable("/app/ssl"); err != nil {
 		logger.Warn("failed to ensure /app/ssl is writable: %v", err)
 	}
+	if err := ensureDirWritable("/app/logs"); err != nil {
+		logger.Warn("failed to ensure /app/logs is writable: %v", err)
+	}
 	if err := ensureDirWritable("/app/static"); err != nil {
 		logger.Warn("failed to ensure /app/static is writable: %v", err)
 	}

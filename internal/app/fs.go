@@ -50,14 +50,15 @@ func ensureConfigFile(destPath, defaultPath string) error {
 }
 
 // ensureDirWritable makes a directory and its existing contents writable by any user.
-// For root-owned files/directories, it sets permissions to 0777/0666 and chowns to 1000:1000.
+// For root-owned files/directories only, it sets permissions to 0777/0666.
+// It does NOT change ownership.
 func ensureDirWritable(dir string) error {
 	// Create if not exists.
 	if err := os.MkdirAll(dir, 0777); err != nil {
 		return err
 	}
 
-	// Fix permissions for root-owned files recursively
+	// Fix permissions for root-owned files recursively (chmod only, no chown)
 	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // continue walking
@@ -66,7 +67,7 @@ func ensureDirWritable(dir string) error {
 		// Check if owned by root (UID 0)
 		stat, ok := info.Sys().(*syscall.Stat_t)
 		if !ok || stat.Uid != 0 {
-			return nil
+			return nil // skip non-root owned files
 		}
 
 		// Set permissions: directories to 0777, files to 0666
@@ -75,9 +76,6 @@ func ensureDirWritable(dir string) error {
 		} else {
 			_ = os.Chmod(path, 0666)
 		}
-
-		// Try to chown to 1000:1000
-		_ = os.Chown(path, 1000, 1000)
 
 		return nil
 	})
