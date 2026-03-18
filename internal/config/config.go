@@ -746,8 +746,8 @@ func (w *MappingWarning) String() string {
 // 2. If upstream is http/https, listen can only be http or https (or auto-detect)
 // 3. If upstream is tcp/udp, listen should match (warning if same, error if different)
 // 4. Smart mode: if listen_protocol is not specified, it's inferred from upstream
-//    - tcp upstream -> tcp listen
-//    - http/https upstream -> http/https listen based on certificate availability (handled by caller)
+//   - tcp upstream -> tcp listen
+//   - http/https upstream -> http/https listen based on certificate availability (handled by caller)
 func ValidateMapping(upstreamKey string, listenerKey string, hasCertificate bool) (ListenConfig, []error, []*MappingWarning) {
 	var errors []error
 	var warnings []*MappingWarning

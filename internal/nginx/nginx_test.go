@@ -71,7 +71,6 @@ func TestGenerateConfigHTTPServerBlock(t *testing.T) {
 	}
 }
 
-
 func TestGenerateConfig_StaticSites(t *testing.T) {
 	// Create temporary directories for static sites
 	tmpDir := t.TempDir()
@@ -94,7 +93,7 @@ func TestGenerateConfig_StaticSites(t *testing.T) {
 	// Create config with static sites
 	cfg := &config.Config{
 		Ports: map[string][]string{
-			staticDir: {"static.example.com"},
+			staticDir:                 {"static.example.com"},
 			"[" + site1Dir + "]/home": {"yourdomain.com"},
 		},
 		RuntimeStaticSites: map[string]config.StaticSiteSpec{
@@ -219,4 +218,3 @@ func TestGenerateConfig_StaticSitesNoIndex(t *testing.T) {
 	// Should NOT have try_files (no SPA support without index.html)
 	// Just check that the config doesn't crash
 }
-

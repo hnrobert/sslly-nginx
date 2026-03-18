@@ -26,10 +26,10 @@ func New(dir string) (*Watcher, error) {
 	}
 
 	w := &Watcher{
-		watcher: watcher,
-		Events:  make(chan fsnotify.Event, 64),
-		Errors:  make(chan error, 16),
-		done:    make(chan struct{}),
+		watcher:     watcher,
+		Events:      make(chan fsnotify.Event, 64),
+		Errors:      make(chan error, 16),
+		done:        make(chan struct{}),
 		watchedDirs: make(map[string]struct{}),
 	}
 
@@ -104,7 +104,7 @@ func (w *Watcher) maybeAddNewDirWatches(event fsnotify.Event) {
 }
 
 func (w *Watcher) addWatchDir(path string) error {
-	// deduplicate	
+	// deduplicate
 	clean := filepath.Clean(path)
 
 	w.mu.Lock()
