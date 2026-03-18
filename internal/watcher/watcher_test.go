@@ -78,6 +78,35 @@ func TestWatcher_SkipsInternalDirs(t *testing.T) {
 	}
 }
 
+func TestWatcher_AddsNewDirectoriesRecursively(t *testing.T) {
+	tmp := t.TempDir()
+
+	w, err := New(tmp)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer w.Stop()
+
+	// Create nested directories after watcher startup.
+	nestedDir := filepath.Join(tmp, "live", "tenant-a")
+	if err := os.MkdirAll(nestedDir, 0755); err != nil {
+		t.Fatalf("mkdir nested: %v", err)
+	}
+
+	// Give the watcher a brief moment to receive/create and register new dirs.
+	time.Sleep(50 * time.Millisecond)
+
+	// Write a file under the newly created nested directory; this should be observed.
+	nestedFile := filepath.Join(nestedDir, "cert.pem")
+	if err := os.WriteFile(nestedFile, []byte("dummy cert"), 0644); err != nil {
+		t.Fatalf("write nested file: %v", err)
+	}
+
+	if err := waitForEventOnPath(w.Events, w.Errors, nestedFile, 2*time.Second); err != nil {
+		t.Fatalf("expected event for %s: %v", nestedFile, err)
+	}
+}
+
 func waitForEventOnPath(events <-chan fsnotify.Event, errors <-chan error, path string, timeout time.Duration) error {
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()

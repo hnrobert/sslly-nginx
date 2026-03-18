@@ -43,6 +43,18 @@ func New(dir string) (*Watcher, error) {
 				if !ok {
 					return
 				}
+				// fsnotify does not automatically watch directories created after startup.
+				// If a new directory is created under a watched path, add it
+				if event.Op&fsnotify.Create == fsnotify.Create {
+					if info, statErr := os.Stat(event.Name); statErr == nil && info.IsDir() {
+						if addErr := w.addRecursive(event.Name); addErr != nil {
+							select {
+							case w.Errors <- addErr:
+							default:
+							}
+						}
+					}
+				}
 				w.Events <- event
 			case err, ok := <-watcher.Errors:
 				if !ok {
