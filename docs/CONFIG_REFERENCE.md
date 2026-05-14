@@ -148,8 +148,8 @@ example-server.local:8080:
 Layer 4 port forwarding. The format is
 
 ```yaml
-<protocol>listen_port:
-  - target_port
+<protocol>upstream_host:port:
+  - listened_server_name|listened_port
 ```
 
 ```yaml
@@ -165,7 +165,11 @@ Layer 4 port forwarding. The format is
 <udp>9123:
   - 8123
 
-# TCP on port 443 (ssl_preread enabled automatically)
+# Assume port 443 is taken by another proxy rule, 
+# and we define a TCP proxy on port 443 here, 
+# ssl_preread would be enabled automatically
+
+# SSLLY
 <tcp>443:
   - 192.168.50.1|22
 ```
@@ -173,8 +177,8 @@ Layer 4 port forwarding. The format is
 **Important:**
 
 - Port is **required** for TCP/UDP upstream
-- For TCP on port 443, `ssl_preread` is automatically enabled
-- Use `|` to specify target host for stream forwarding
+- For ports where TCP and HTTP/HTTPS are simultaneously listened, `ssl_preread` would be automatically enabled
+- Use `|` to separate the listened_server_name and target port on local machine to listen for stream forwarding
 
 ### Static Site Serving
 
