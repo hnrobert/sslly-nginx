@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/hnrobert/sslly-nginx/internal/backup"
 	"github.com/hnrobert/sslly-nginx/internal/config"
 	"github.com/hnrobert/sslly-nginx/internal/logger"
@@ -21,16 +22,21 @@ const (
 )
 
 type App struct {
-	configWatcher *watcher.Watcher
-	sslWatcher    *watcher.Watcher
-	config        *config.Config
-	nginxManager  *nginx.Manager
-	lastGoodConf  string
-	activeCertMap map[string]ssl.Certificate
-	sslReport     ssl.ScanReport
-	backupManager *backup.Manager
-	staticSites   map[string]*runningStaticSite
-	reloadMu      sync.Mutex
+	configWatcher       *watcher.Watcher
+	sslWatcher          *watcher.Watcher
+	runtimeNginxWatcher *fsnotify.Watcher
+	config              *config.Config
+	nginxManager        *nginx.Manager
+	lastGoodConf        string
+	activeCertMap       map[string]ssl.Certificate
+	sslReport           ssl.ScanReport
+	backupManager       *backup.Manager
+	staticSites         map[string]*runningStaticSite
+	reloadMu            sync.Mutex
+
+	// suppress nginx.conf watchers for 2s after a programmatic write
+	suppressNginxMu         sync.Mutex
+	suppressNginxWatchUntil time.Time
 
 	reloadDebounceMu    sync.Mutex
 	reloadDebounceTimer *time.Timer
@@ -138,6 +144,9 @@ func (a *App) Stop() {
 	}
 	if a.sslWatcher != nil {
 		a.sslWatcher.Stop()
+	}
+	if a.runtimeNginxWatcher != nil {
+		a.runtimeNginxWatcher.Close()
 	}
 	a.stopAllStaticSites()
 	a.reloadDebounceMu.Lock()
