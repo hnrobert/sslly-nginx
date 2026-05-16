@@ -211,6 +211,66 @@ Serve local directories as static websites.
 - Colon (`:`) in path is NOT a port separator
 - SPA support enabled if `index.html` exists
 
+## Path Options
+
+### Trailing Slash Redirect
+
+By default, sslly-nginx generates a redirect from `/route` to `/route/` for every non-root path:
+
+```nginx
+# Generated automatically for non-root paths
+location = /api {
+    return 301 $scheme://$host/api/;
+}
+location /api/ {
+    proxy_pass http://127.0.0.1:8080/;
+}
+```
+
+This ensures consistent URL canonicalization. To disable it for specific paths, add a `no_trailing_slash` list to `proxy.yaml`:
+
+```yaml
+8080:
+  - example.com/api
+  - example.com/dashboard
+
+# Disable trailing slash redirect for these paths
+no_trailing_slash:
+  - example.com/api
+```
+
+With `no_trailing_slash`, the redirect block is omitted and the location matches both `/api` and `/api/`:
+
+```nginx
+# Generated when path is in no_trailing_slash
+location /api/ {
+    proxy_pass http://127.0.0.1:8080/;
+}
+```
+
+**Rules:**
+
+- Values must exactly match the `listener_key` path entries (domain + path, e.g. `example.com/api`)
+- Applies to both proxy routes and static site routes
+- Root paths (`/`) are unaffected — they never generate a redirect regardless
+
+**Example — mixed config:**
+
+```yaml
+# API: no redirect (client sends /api or /api/, both work)
+8080:
+  - example.com/api
+
+# Admin: redirect enforced (canonical URL is /admin/)
+9090:
+  - example.com/admin
+
+no_trailing_slash:
+  - example.com/api
+```
+
+---
+
 ## Validation Rules
 
 ### Protocol Compatibility

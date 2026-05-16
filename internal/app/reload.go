@@ -5,6 +5,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/hnrobert/sslly-nginx/internal/backup"
 	"github.com/hnrobert/sslly-nginx/internal/config"
 	"github.com/hnrobert/sslly-nginx/internal/logger"
 	"github.com/hnrobert/sslly-nginx/internal/nginx"
@@ -86,6 +87,27 @@ func (a *App) reload(snapshotID string) error {
 	if err := activateRuntimeSnapshot(snapshotID); err != nil {
 		return fmt.Errorf("failed to activate runtime snapshot: %w", err)
 	}
+	// Re-register runtime nginx.conf watcher — current/ was replaced by rename.
+	if err := a.reRegisterRuntimeNginxWatcher(); err != nil {
+		logger.Warn("failed to re-register runtime nginx.conf watcher: %v", err)
+	}
+
+	// Back up manually edited nginx.conf before overwriting.
+	if existing, err := os.ReadFile(nginxConf); err == nil {
+		if a.lastGoodConf != "" && string(existing) != a.lastGoodConf {
+			ts := time.Now().UTC().Format("20060102T150405.000000000Z")
+			bkDir := backup.DefaultBackupRoot(configDir)
+			backupPath := bkDir + "/manual-nginx-" + ts + ".conf"
+			if err := os.MkdirAll(bkDir, 0755); err == nil {
+				if err := os.WriteFile(backupPath, existing, 0644); err == nil {
+					logger.Info("Backed up manually edited nginx.conf to %s", backupPath)
+				}
+			}
+		}
+	}
+
+	// Suppress nginx.conf watchers before writing.
+	a.suppressNginxWatch()
 
 	// Write nginx configuration
 	if err := os.WriteFile(nginxConf, []byte(nginxConfig), 0644); err != nil {

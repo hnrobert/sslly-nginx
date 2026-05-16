@@ -80,6 +80,19 @@
 #   - v2.example.com
 
 # =============================================================================
+# Path Options
+# =============================================================================
+
+# By default, non-root paths redirect /route → /route/ (HTTP 301).
+# Use no_trailing_slash to disable this for specific paths.
+#
+# Values must exactly match the listener_key entries (domain + path).
+
+# no_trailing_slash:
+#   - shared.example.com/api      # /api and /api/ both work, no redirect
+#   - example.com/docs            # applies to both proxy routes and static sites
+
+# =============================================================================
 # Listener Configuration Examples
 # =============================================================================
 

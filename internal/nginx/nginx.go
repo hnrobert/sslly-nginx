@@ -224,6 +224,12 @@ func formatUpstreamAddr(upstream config.Upstream) string {
 }
 
 func GenerateConfig(cfg *config.Config, certMap map[string]ssl.Certificate) string {
+	// Build a set of paths that should not have trailing slash redirects.
+	noTrailingSlash := make(map[string]bool, len(cfg.NoTrailingSlash))
+	for _, p := range cfg.NoTrailingSlash {
+		noTrailingSlash[p] = true
+	}
+
 	var sb strings.Builder
 
 	// Read ports from environment with sensible defaults
@@ -502,12 +508,12 @@ events {
 
 			// Generate location blocks for static sites
 			if len(staticSiteRoutes) > 0 {
-				generateStaticSiteLocations(&sb, staticSiteRoutes, corsConfig)
+				generateStaticSiteLocations(&sb, staticSiteRoutes, corsConfig, noTrailingSlash)
 			}
 
 			// Generate location blocks for proxy routes
 			if len(routes) > 0 {
-				generateProxyLocations(&sb, routes, corsConfig)
+				generateProxyLocations(&sb, routes, corsConfig, noTrailingSlash)
 			}
 
 			sb.WriteString(`    }
@@ -532,12 +538,12 @@ events {
 
 		// Generate location blocks for static sites
 		if len(staticSiteRoutes) > 0 {
-			generateStaticSiteLocations(&sb, staticSiteRoutes, corsConfig)
+			generateStaticSiteLocations(&sb, staticSiteRoutes, corsConfig, noTrailingSlash)
 		}
 
 		// Generate location blocks for proxy routes
 		if len(routes) > 0 {
-			generateProxyLocations(&sb, routes, corsConfig)
+			generateProxyLocations(&sb, routes, corsConfig, noTrailingSlash)
 		}
 
 		sb.WriteString(`    }
@@ -552,7 +558,7 @@ events {
 
 // generateStaticSiteLocations generates nginx location blocks for static sites
 // Uses root directive for "/" path, alias directive for non-root paths
-func generateStaticSiteLocations(sb *strings.Builder, routes []StaticRouteConfig, corsConfig *config.CORSConfig) {
+func generateStaticSiteLocations(sb *strings.Builder, routes []StaticRouteConfig, corsConfig *config.CORSConfig, noTrailingSlash map[string]bool) {
 	corsHeaders := generateCORSHeaders(corsConfig)
 
 	// Sort routes by path length (longest first)
@@ -591,12 +597,14 @@ func generateStaticSiteLocations(sb *strings.Builder, routes []StaticRouteConfig
 			}
 		} else {
 			// Non-root path: use alias directive
-			// Add redirect for path without trailing slash
-			sb.WriteString(fmt.Sprintf(`        location = %s {
+			// Add redirect for path without trailing slash (unless disabled)
+			if !noTrailingSlash[route.DomainPath] {
+				sb.WriteString(fmt.Sprintf(`        location = %s {
             return 301 $scheme://$host%s/;
         }
 
 `, locationPath, locationPath))
+			}
 
 			// Ensure alias path ends with /
 			aliasPath := route.StaticSite.Dir
@@ -632,7 +640,7 @@ func generateStaticSiteLocations(sb *strings.Builder, routes []StaticRouteConfig
 }
 
 // generateProxyLocations generates nginx location blocks for proxy routes
-func generateProxyLocations(sb *strings.Builder, routes []RouteConfig, corsConfig *config.CORSConfig) {
+func generateProxyLocations(sb *strings.Builder, routes []RouteConfig, corsConfig *config.CORSConfig, noTrailingSlash map[string]bool) {
 	corsHeaders := generateCORSHeaders(corsConfig)
 
 	// Sort routes by path length (longest first)
@@ -650,13 +658,15 @@ func generateProxyLocations(sb *strings.Builder, routes []RouteConfig, corsConfi
 			proxyPass += route.Upstream.Path
 		}
 
-		// For non-root paths, add redirect and use trailing slash
+		// For non-root paths, optionally add redirect and use trailing slash
 		if locationPath != "/" {
-			sb.WriteString(fmt.Sprintf(`        location = %s {
+			if !noTrailingSlash[route.DomainPath] {
+				sb.WriteString(fmt.Sprintf(`        location = %s {
             return 301 $scheme://$host%s/;
         }
 
 `, locationPath, locationPath))
+			}
 			locationPath = locationPath + "/"
 			if !strings.HasSuffix(proxyPass, "/") {
 				proxyPass += "/"

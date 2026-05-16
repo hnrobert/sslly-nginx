@@ -54,3 +54,5 @@ bin/
 .venv
 
 settings.local.json
+configs/.*
+logs/
