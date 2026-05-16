@@ -87,14 +87,18 @@ func (a *App) setupWatchers() error {
 		}
 	}()
 
-	// Watch /etc/nginx/nginx.conf for manual edits
+	// Watch /etc/nginx/ directory for manual edits to nginx.conf.
+	// Watching the directory (not the file) is required because editors often
+	// use atomic writes (write temp + rename), which changes the inode and
+	// breaks file-level inotify watches.
+	etcNginxDir := filepath.Dir(nginxConf)
 	etcWatcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return fmt.Errorf("failed to create nginx.conf watcher: %w", err)
 	}
-	if err := etcWatcher.Add(nginxConf); err != nil {
+	if err := etcWatcher.Add(etcNginxDir); err != nil {
 		etcWatcher.Close()
-		logger.Warn("Could not watch %s: %v", nginxConf, err)
+		logger.Warn("Could not watch %s: %v", etcNginxDir, err)
 	} else {
 		go func() {
 			for {
@@ -103,8 +107,12 @@ func (a *App) setupWatchers() error {
 					if !ok {
 						return
 					}
+					if filepath.Base(event.Name) != "nginx.conf" {
+						continue
+					}
 					if event.Op&fsnotify.Write == fsnotify.Write ||
-						event.Op&fsnotify.Create == fsnotify.Create {
+						event.Op&fsnotify.Create == fsnotify.Create ||
+						event.Op&fsnotify.Rename == fsnotify.Rename {
 						if a.isNginxWatchSuppressed() {
 							continue
 						}
@@ -133,15 +141,16 @@ func (a *App) setupWatchers() error {
 // reRegisterRuntimeNginxWatcher closes any existing runtime nginx.conf watcher
 // and creates a new one. Called after each activateRuntimeSnapshot because the
 // current/ directory is replaced by rename, invalidating the previous inode.
+// Watches the directory (not the file) to survive atomic editor writes.
 func (a *App) reRegisterRuntimeNginxWatcher() error {
 	if a.runtimeNginxWatcher != nil {
 		a.runtimeNginxWatcher.Close()
 		a.runtimeNginxWatcher = nil
 	}
 
-	runtimeConf := runtimeNginxConfPath()
-	if _, err := os.Stat(runtimeConf); err != nil {
-		// File doesn't exist yet; will be registered on next snapshot activation.
+	runtimeNginxDir := filepath.Dir(runtimeNginxConfPath())
+	if _, err := os.Stat(runtimeNginxDir); err != nil {
+		// Directory doesn't exist yet; will be registered on next snapshot activation.
 		return nil
 	}
 
@@ -149,7 +158,7 @@ func (a *App) reRegisterRuntimeNginxWatcher() error {
 	if err != nil {
 		return err
 	}
-	if err := w.Add(runtimeConf); err != nil {
+	if err := w.Add(runtimeNginxDir); err != nil {
 		w.Close()
 		return err
 	}
@@ -162,12 +171,17 @@ func (a *App) reRegisterRuntimeNginxWatcher() error {
 				if !ok {
 					return
 				}
+				if filepath.Base(event.Name) != "nginx.conf" {
+					continue
+				}
 				if event.Op&fsnotify.Write == fsnotify.Write ||
-					event.Op&fsnotify.Create == fsnotify.Create {
+					event.Op&fsnotify.Create == fsnotify.Create ||
+					event.Op&fsnotify.Rename == fsnotify.Rename {
 					if a.isNginxWatchSuppressed() {
 						continue
 					}
 					logger.Info("Manual edit detected: %s", event.Name)
+					runtimeConf := runtimeNginxConfPath()
 					a.handleNginxConfEdit(runtimeConf, nginxConf)
 				}
 			case err, ok := <-w.Errors:
