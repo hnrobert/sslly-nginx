@@ -103,9 +103,10 @@ func (p Protocol) IsStatic() bool {
 }
 
 type Config struct {
-	Log   LogConfig             `yaml:"log"`
-	CORS  map[string]CORSConfig `yaml:"cors"`
-	Ports map[string][]string   `yaml:",inline"`
+	Log             LogConfig             `yaml:"log"`
+	CORS            map[string]CORSConfig `yaml:"cors"`
+	NoTrailingSlash []string              `yaml:"no_trailing_slash"`
+	Ports           map[string][]string   `yaml:",inline"`
 
 	// RuntimeStaticSites stores static site information for nginx config generation.
 	// Key is the original config key (e.g., "/app/static" or "[/app/static]/route").
@@ -428,6 +429,7 @@ func Load(configDir string) (*Config, error) {
 	// Defensive: do not allow these keys to appear as ports.
 	delete(config.Ports, "cors")
 	delete(config.Ports, "log")
+	delete(config.Ports, "no_trailing_slash")
 
 	if len(config.Ports) == 0 {
 		return nil, fmt.Errorf("config is empty or invalid (%s has no proxy mappings)", proxyConfigFile)
