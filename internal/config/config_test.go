@@ -1,8 +1,38 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
+
+func TestLoad_NoTrailingSlash(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	proxyYAML := `8080:
+  - example.com/api
+  - example.com/admin
+
+no_trailing_slash:
+  - example.com/api
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "proxy.yaml"), []byte(proxyYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(tmpDir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if len(cfg.NoTrailingSlash) != 1 || cfg.NoTrailingSlash[0] != "example.com/api" {
+		t.Errorf("unexpected NoTrailingSlash: %v", cfg.NoTrailingSlash)
+	}
+
+	if _, ok := cfg.Ports["no_trailing_slash"]; ok {
+		t.Error("no_trailing_slash should not appear in Ports map")
+	}
+}
 
 func TestParseStaticSiteKey(t *testing.T) {
 	tests := []struct {

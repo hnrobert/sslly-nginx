@@ -188,6 +188,96 @@ func TestGenerateConfig_StaticSitesWithProxy(t *testing.T) {
 	}
 }
 
+func TestGenerateConfig_NoTrailingSlash_ProxyRoute(t *testing.T) {
+	cfg := &config.Config{
+		CORS: map[string]config.CORSConfig{},
+		Ports: map[string][]string{
+			"8080": {"example.com/api"},
+		},
+		NoTrailingSlash: []string{"example.com/api"},
+	}
+
+	ng := GenerateConfig(cfg, map[string]ssl.Certificate{})
+
+	if strings.Contains(ng, "location = /api") {
+		t.Error("no_trailing_slash: redirect block should not be generated for example.com/api")
+	}
+	if !strings.Contains(ng, "location /api/") {
+		t.Error("proxy location /api/ should still be present")
+	}
+}
+
+func TestGenerateConfig_DefaultTrailingSlash_ProxyRoute(t *testing.T) {
+	cfg := &config.Config{
+		CORS: map[string]config.CORSConfig{},
+		Ports: map[string][]string{
+			"8080": {"example.com/api"},
+		},
+	}
+
+	ng := GenerateConfig(cfg, map[string]ssl.Certificate{})
+
+	if !strings.Contains(ng, "location = /api") {
+		t.Error("default: redirect block should be generated for /api")
+	}
+	if !strings.Contains(ng, "return 301 $scheme://$host/api/") {
+		t.Error("default: 301 redirect to /api/ should be present")
+	}
+}
+
+func TestGenerateConfig_NoTrailingSlash_StaticSite(t *testing.T) {
+	tmpDir := t.TempDir()
+	staticDir := filepath.Join(tmpDir, "static")
+	if err := os.MkdirAll(staticDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{
+		Ports: map[string][]string{
+			staticDir: {"example.com/docs"},
+		},
+		RuntimeStaticSites: map[string]config.StaticSiteSpec{
+			staticDir: {Dir: staticDir},
+		},
+		NoTrailingSlash: []string{"example.com/docs"},
+	}
+
+	ng := GenerateConfig(cfg, nil)
+
+	if strings.Contains(ng, "location = /docs") {
+		t.Error("no_trailing_slash: redirect block should not be generated for example.com/docs")
+	}
+	if !strings.Contains(ng, "location /docs/") {
+		t.Error("alias location /docs/ should still be present")
+	}
+}
+
+func TestGenerateConfig_DefaultTrailingSlash_StaticSite(t *testing.T) {
+	tmpDir := t.TempDir()
+	staticDir := filepath.Join(tmpDir, "static")
+	if err := os.MkdirAll(staticDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{
+		Ports: map[string][]string{
+			staticDir: {"example.com/docs"},
+		},
+		RuntimeStaticSites: map[string]config.StaticSiteSpec{
+			staticDir: {Dir: staticDir},
+		},
+	}
+
+	ng := GenerateConfig(cfg, nil)
+
+	if !strings.Contains(ng, "location = /docs") {
+		t.Error("default: redirect block should be generated for /docs")
+	}
+	if !strings.Contains(ng, "return 301 $scheme://$host/docs/") {
+		t.Error("default: 301 redirect to /docs/ should be present")
+	}
+}
+
 func TestGenerateConfig_StaticSitesNoIndex(t *testing.T) {
 	// Create temporary directory without index.html
 	tmpDir := t.TempDir()
