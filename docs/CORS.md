@@ -79,13 +79,84 @@ You can also configure CORS for specific domains:
   max_age: 86400 # 1 day
 ```
 
+### Wildcard Matching & Precedence
+
+CORS keys support three forms:
+
+| Form             | Example              | Matches                                                                                        |
+| ---------------- | -------------------- | ---------------------------------------------------------------------------------------------- |
+| Exact domain     | `api.example.com`    | Only `api.example.com`                                                                         |
+| Suffix wildcard  | `*.example.com`      | Any subdomain (`api.example.com`, `app.api.example.com`) — **not** the bare apex `example.com` |
+| Catch-all        | `*`                  | Every domain                                                                                   |
+
+When multiple keys match a domain, the **most specific** wins, in this order:
+
+1. Exact domain match
+2. **Longest** matching `*.suffix` (e.g. `*.api.example.com` wins over `*.example.com`)
+3. The `*` catch-all
+
+```yaml
+# Resolution for api.cpu.ibuduan.com (most specific wins):
+'api.cpu.ibuduan.com': { allow_origin: 'https://app.ibuduan.com' }   # 1. exact — wins
+'*.cpu.ibuduan.com':   { allow_origin: 'https://cpu.ibuduan.com' }   # 2. longer suffix
+'*.ibuduan.com':       { allow_origin: '*' }                          # 3. shorter suffix
+'*':                   { allow_origin: '*' }                          # 4. catch-all
+```
+
+> **Note:** A `*.suffix` key matches subdomains only. `*.example.com` will **not** match the bare apex `example.com` — add an exact `example.com` key for that.
+
+This mirrors how TLS certificates are matched (see `FindCertificate`).
+
+### Layer Inheritance & Clearing
+
+Matching layers are merged field-by-field from the least to the most specific
+(`*` → `*.suffix` shortest → longest → exact). A field you **don't** mention in
+a more specific key is **inherited** from the lower-priority layers, so a
+per-domain entry only needs to state what differs:
+
+```yaml
+'*':
+  allow_origin: '*'
+  allow_methods: [GET, POST]
+  allow_headers: [Content-Type]
+
+'api.example.com':
+  allow_credentials: true   # only this field overrides; the rest is inherited
+```
+
+To **suppress** a header that a lower layer would otherwise emit, set it to an
+empty value (`""` or `null`). An explicitly-empty field is *cleared* — the
+corresponding header is omitted entirely from that domain's server block:
+
+```yaml
+'*':
+  allow_origin: '*'
+  allow_methods: [GET, POST]
+  allow_headers: [Content-Type]
+
+'api.example.com':
+  allow_origin: ''   # ← Access-Control-Allow-Origin is OMITTED for this domain
+                     #   methods (GET, POST) and headers (Content-Type) are inherited
+```
+
+| Field state in the winning layer(s) | Resulting header                         |
+| ----------------------------------- | ---------------------------------------- |
+| Set to a value                      | Emitted with that value                  |
+| Not set in any matching layer       | Inherited, or the built-in default       |
+| Explicitly `""` or `null`           | **Omitted** (cleared)                    |
+
+This applies to `allow_origin`, `allow_methods`, `allow_headers`, and
+`expose_headers`. `max_age` and `allow_credentials` are not clearable (set them
+to the value you want, or omit to inherit/default).
+
 ## Generated Nginx Configuration
+
+> **Ordering:** Nginx server blocks are emitted in the declaration order of `proxy.yaml` (top-level key order, then each key's domain list in order). The output is deterministic across reloads.
 
 The CORS configuration generates appropriate Nginx headers. Example output:
 
 ```conf
 # CORS configuration
-add_header 'Access-Control-Allow-Origin' '*' always;
 add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, DELETE' always;
 add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization' always;
 add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;
@@ -103,6 +174,18 @@ if ($request_method = 'OPTIONS') {
 }
 
 ```
+
+> **Why `Access-Control-Allow-Origin` appears only in the OPTIONS block:**
+> Many proxied backends already set this header on actual responses. Adding it
+> again at the location level produces a *duplicate* `Access-Control-Allow-Origin`,
+> which browsers reject with `Access-Control-Allow-Origin cannot contain more than
+> one origin`. So nginx emits `Access-Control-Allow-Origin` only inside the OPTIONS
+> preflight block, where `return 204` short-circuits before `proxy_pass` and the
+> backend is never reached (exactly one Origin). `Allow-Methods` / `Allow-Headers` /
+> `Expose-Headers` stay at the location level because backends typically don't set
+> those. If your backend does **not** send `Access-Control-Allow-Origin` on actual
+> requests, cross-origin actual requests will lack the header — handle CORS in the
+> backend, or strip it with `proxy_hide_header` so nginx owns it fully.
 
 ## Important Notes
 

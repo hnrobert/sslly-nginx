@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -112,75 +113,175 @@ func (m *Manager) CheckHealth() error {
 	return nil
 }
 
-// getCORSConfig returns the CORS configuration for a given domain
+// getCORSConfig returns the merged CORS configuration for a given domain.
+//
+// Matching layers are applied from lowest to highest priority, so a more
+// specific layer overrides (or clears) fields set by a more general one, while
+// fields it leaves unset are inherited:
+//
+//  1. "*" catch-all (lowest priority)
+//  2. "*.suffix" wildcards, shortest suffix first; "*.suffix" matches subdomains
+//     only — "*.example.com" matches "api.example.com" but not "example.com".
+//  3. Exact domain key (highest priority)
+//
+// A field explicitly set to an empty value ("", null, or []) in a higher layer
+// clears (omits) that header in the result; a field left unset is inherited.
+// This mirrors ssl.FindCertificate's "*.suffix" handling.
 func getCORSConfig(cfg *config.Config, domain string) *config.CORSConfig {
-	// Check for wildcard first
-	if corsConfig, ok := cfg.CORS["*"]; ok {
-		return &corsConfig
+	if cfg.CORS == nil {
+		return nil
+	}
+	domain = strings.ToLower(strings.TrimSpace(domain))
+
+	// Collect applicable layers in priority order (lowest first).
+	var layers []config.CORSConfig
+
+	// 1. Catch-all.
+	if c, ok := cfg.CORS["*"]; ok {
+		layers = append(layers, c)
 	}
 
-	// Check for exact domain match
-	if corsConfig, ok := cfg.CORS[domain]; ok {
-		return &corsConfig
+	// 2. Matching "*.suffix" wildcards, shortest suffix first.
+	type wildcard struct {
+		suffix string
+		cfg    config.CORSConfig
+	}
+	var wildcards []wildcard
+	for pat, c := range cfg.CORS {
+		if !strings.HasPrefix(pat, "*.") {
+			continue
+		}
+		suffix := pat[1:] // ".example.com"
+		if domain != pat[2:] && strings.HasSuffix(domain, suffix) {
+			wildcards = append(wildcards, wildcard{suffix, c})
+		}
+	}
+	sort.SliceStable(wildcards, func(i, j int) bool {
+		return len(wildcards[i].suffix) < len(wildcards[j].suffix)
+	})
+	for _, w := range wildcards {
+		layers = append(layers, w.cfg)
 	}
 
-	return nil
+	// 3. Exact match (highest priority).
+	if c, ok := cfg.CORS[domain]; ok {
+		layers = append(layers, c)
+	}
+
+	if len(layers) == 0 {
+		return nil
+	}
+
+	// Merge: each layer's explicitly-present fields override the accumulator.
+	merged := config.CORSConfig{}
+	presence := config.CORSFieldPresence{}
+	for _, l := range layers {
+		lp := l.Presence()
+		if lp.AllowOrigin {
+			merged.AllowOrigin = l.AllowOrigin
+			presence.AllowOrigin = true
+		}
+		if lp.AllowMethods {
+			merged.AllowMethods = l.AllowMethods
+			presence.AllowMethods = true
+		}
+		if lp.AllowHeaders {
+			merged.AllowHeaders = l.AllowHeaders
+			presence.AllowHeaders = true
+		}
+		if lp.ExposeHeaders {
+			merged.ExposeHeaders = l.ExposeHeaders
+			presence.ExposeHeaders = true
+		}
+		if lp.MaxAge {
+			merged.MaxAge = l.MaxAge
+			presence.MaxAge = true
+		}
+		if lp.AllowCredentials {
+			merged.AllowCredentials = l.AllowCredentials
+			presence.AllowCredentials = true
+		}
+	}
+	merged.SetPresence(presence)
+	return &merged
 }
 
-// generateCORSHeaders generates CORS header configuration from CORSConfig
+// generateCORSHeaders generates CORS header configuration from CORSConfig.
+//
+// Access-Control-Allow-Origin is emitted ONLY inside the OPTIONS preflight
+// block, never at the location level. Many proxied backends already send this
+// header on actual responses; emitting it at the location level would produce a
+// duplicate ("Access-Control-Allow-Origin cannot contain more than one origin"
+// in the browser). For the preflight the `return 204` short-circuits before
+// proxy_pass, so the backend is never reached and exactly one Origin is sent.
 func generateCORSHeaders(corsConfig *config.CORSConfig) string {
+	// No cors.yaml entry: use built-in defaults via the resolved path below (a
+	// zero-value CORSConfig with no presence falls back to every default).
 	if corsConfig == nil {
-		// Default CORS configuration
-		return `            # CORS configuration
-            add_header 'Access-Control-Allow-Origin' '*' always;
-            add_header 'Access-Control-Allow-Methods' 'GET, HEAD, POST, PUT, DELETE, CONNECT, OPTIONS, TRACE, PATCH' always;
-            add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization' always;
-            add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;
-
-            # Handle OPTIONS preflight requests
-            if ($request_method = 'OPTIONS') {
-                add_header 'Access-Control-Max-Age' 1728000;
-                add_header 'Content-Type' 'text/plain; charset=utf-8';
-                add_header 'Content-Length' 0;
-                return 204;
-            }`
+		corsConfig = &config.CORSConfig{}
 	}
 
-	// Apply defaults
-	allowOrigin := corsConfig.AllowOrigin
-	if allowOrigin == "" {
-		allowOrigin = "*"
+	// Resolve each header field. A field that was explicitly set to an empty
+	// value ("", null, or []) is cleared (omitted); a field left unset by every
+	// matching layer inherits its default.
+	p := corsConfig.Presence()
+
+	const (
+		defaultMethods = "GET, HEAD, POST, PUT, DELETE, CONNECT, OPTIONS, TRACE, PATCH"
+		defaultHeaders = "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization"
+		defaultExpose  = "Content-Length,Content-Range"
+	)
+
+	// resolveSlice: present=false → default; present=true+empty → cleared; else join.
+	resolveSlice := func(present bool, parts []string, sep, def string) (string, bool) {
+		if !present {
+			return def, true
+		}
+		if len(parts) == 0 {
+			return "", false
+		}
+		return strings.Join(parts, sep), true
+	}
+	// resolveStr: present=false → default; present=true+"" → cleared; else value.
+	resolveStr := func(present bool, val, def string) (string, bool) {
+		if !present {
+			return def, true
+		}
+		if val == "" {
+			return "", false
+		}
+		return val, true
 	}
 
-	allowMethods := corsConfig.AllowMethods
-	if len(allowMethods) == 0 {
-		allowMethods = []string{"GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH"}
-	}
-	methodsStr := strings.Join(allowMethods, ", ")
-
-	allowHeaders := corsConfig.AllowHeaders
-	if len(allowHeaders) == 0 {
-		allowHeaders = []string{"DNT", "User-Agent", "X-Requested-With", "If-Modified-Since", "Cache-Control", "Content-Type", "Range", "Authorization"}
-	}
-	headersStr := strings.Join(allowHeaders, ",")
-
-	exposeHeaders := corsConfig.ExposeHeaders
-	if len(exposeHeaders) == 0 {
-		exposeHeaders = []string{"Content-Length", "Content-Range"}
-	}
-	exposeHeadersStr := strings.Join(exposeHeaders, ",")
+	originVal, emitOrigin := resolveStr(p.AllowOrigin, corsConfig.AllowOrigin, "*")
+	methodsVal, emitMethods := resolveSlice(p.AllowMethods, corsConfig.AllowMethods, ", ", defaultMethods)
+	headersVal, emitHeaders := resolveSlice(p.AllowHeaders, corsConfig.AllowHeaders, ",", defaultHeaders)
+	exposeVal, emitExpose := resolveSlice(p.ExposeHeaders, corsConfig.ExposeHeaders, ",", defaultExpose)
 
 	maxAge := corsConfig.MaxAge
-	if maxAge == 0 {
+	if !p.MaxAge {
 		maxAge = 1728000 // 20 days
 	}
 
 	var sb strings.Builder
 	sb.WriteString("            # CORS configuration\n")
-	sb.WriteString(fmt.Sprintf("            add_header 'Access-Control-Allow-Origin' '%s' always;\n", allowOrigin))
-	sb.WriteString(fmt.Sprintf("            add_header 'Access-Control-Allow-Methods' '%s' always;\n", methodsStr))
-	sb.WriteString(fmt.Sprintf("            add_header 'Access-Control-Allow-Headers' '%s' always;\n", headersStr))
-	sb.WriteString(fmt.Sprintf("            add_header 'Access-Control-Expose-Headers' '%s' always;\n", exposeHeadersStr))
+	// NOTE: Access-Control-Allow-Origin is intentionally NOT emitted at the
+	// location level. Many proxied backends already send this header on actual
+	// responses; emitting it here would duplicate it and trigger
+	// "Access-Control-Allow-Origin cannot contain more than one origin" in the
+	// browser. Origin is only added inside the OPTIONS preflight block below,
+	// where `return 204` short-circuits before proxy_pass (so the backend is
+	// never reached and there is exactly one Origin). Methods/Headers/Expose
+	// are still emitted here because backends typically don't set those.
+	if emitMethods {
+		sb.WriteString(fmt.Sprintf("            add_header 'Access-Control-Allow-Methods' '%s' always;\n", methodsVal))
+	}
+	if emitHeaders {
+		sb.WriteString(fmt.Sprintf("            add_header 'Access-Control-Allow-Headers' '%s' always;\n", headersVal))
+	}
+	if emitExpose {
+		sb.WriteString(fmt.Sprintf("            add_header 'Access-Control-Expose-Headers' '%s' always;\n", exposeVal))
+	}
 
 	if corsConfig.AllowCredentials {
 		sb.WriteString("            add_header 'Access-Control-Allow-Credentials' 'true' always;\n")
@@ -188,9 +289,15 @@ func generateCORSHeaders(corsConfig *config.CORSConfig) string {
 
 	sb.WriteString("\n            # Handle OPTIONS preflight requests\n")
 	sb.WriteString("            if ($request_method = 'OPTIONS') {\n")
-	sb.WriteString(fmt.Sprintf("                add_header 'Access-Control-Allow-Origin' '%s' always;\n", allowOrigin))
-	sb.WriteString(fmt.Sprintf("                add_header 'Access-Control-Allow-Methods' '%s' always;\n", methodsStr))
-	sb.WriteString(fmt.Sprintf("                add_header 'Access-Control-Allow-Headers' '%s' always;\n", headersStr))
+	if emitOrigin {
+		sb.WriteString(fmt.Sprintf("                add_header 'Access-Control-Allow-Origin' '%s' always;\n", originVal))
+	}
+	if emitMethods {
+		sb.WriteString(fmt.Sprintf("                add_header 'Access-Control-Allow-Methods' '%s' always;\n", methodsVal))
+	}
+	if emitHeaders {
+		sb.WriteString(fmt.Sprintf("                add_header 'Access-Control-Allow-Headers' '%s' always;\n", headersVal))
+	}
 	if corsConfig.AllowCredentials {
 		sb.WriteString("                add_header 'Access-Control-Allow-Credentials' 'true' always;\n")
 	}
@@ -299,7 +406,7 @@ events {
 
 	// Generate stream block for TCP/UDP if there are any stream mappings
 	if len(streamMappings) > 0 {
-		sb.WriteString(generateStreamBlock(streamMappings, httpPort, httpsPort))
+		sb.WriteString(generateStreamBlock(streamMappings, httpsPort))
 	}
 
 	sb.WriteString(`http {
@@ -405,9 +512,9 @@ events {
 		}
 	}
 
-	// Collect domains with and without certificates
-	var domainsWithCerts []string
-	var domainsWithoutCerts []string
+	// Build an ordered, de-duplicated list of base domains following the
+	// declaration order of proxy.yaml (cfg.OrderedPorts). This makes server
+	// block emission and the redirect server_name lists deterministic.
 	allDomains := make(map[string]bool)
 	for baseDomain := range domainRoutes {
 		allDomains[baseDomain] = true
@@ -415,7 +522,30 @@ events {
 	for baseDomain := range staticRoutes {
 		allDomains[baseDomain] = true
 	}
-	for baseDomain := range allDomains {
+	var orderedDomains []string
+	seen := make(map[string]bool)
+	for _, key := range cfg.OrderedPorts {
+		for _, domainPath := range cfg.Ports[key] {
+			baseDomain, _ := splitDomainPath(domainPath)
+			if baseDomain == "" || seen[baseDomain] {
+				continue
+			}
+			seen[baseDomain] = true
+			orderedDomains = append(orderedDomains, baseDomain)
+		}
+	}
+	// Defensive fallback: if order info is unavailable, use the map keys so
+	// every configured domain is still emitted.
+	if len(orderedDomains) == 0 {
+		for baseDomain := range allDomains {
+			orderedDomains = append(orderedDomains, baseDomain)
+		}
+	}
+
+	// Collect domains with and without certificates, in declaration order.
+	var domainsWithCerts []string
+	var domainsWithoutCerts []string
+	for _, baseDomain := range orderedDomains {
 		cert, hasCert := ssl.FindCertificate(certMap, baseDomain)
 		if hasCert && cert.KeyPath != "" {
 			domainsWithCerts = append(domainsWithCerts, baseDomain)
@@ -427,14 +557,18 @@ events {
 	// Generate default server blocks to handle unconfigured domains
 	sb.WriteString(`    # Default server for HTTP - reject unconfigured domains
     server {
-        listen ` + httpPort + ` default_server;
+        listen `)
+	sb.WriteString(httpPort)
+	sb.WriteString(` default_server;
         server_name _;
         return 444;
     }
 
     # Default server for HTTPS - reject unconfigured domains
     server {
-        listen ` + httpsPort + ` ssl default_server;
+        listen `)
+	sb.WriteString(httpsPort)
+	sb.WriteString(` ssl default_server;
         server_name _;
 
         # Use a dummy self-signed certificate
@@ -453,8 +587,12 @@ events {
 	if len(domainsWithCerts) > 0 {
 		sb.WriteString(`    # HTTP to HTTPS redirect for domains with certificates
     server {
-        listen ` + httpPort + `;
-        server_name ` + strings.Join(domainsWithCerts, " ") + `;
+        listen `)
+		sb.WriteString(httpPort)
+		sb.WriteString(`;
+        server_name `)
+		sb.WriteString(strings.Join(domainsWithCerts, " "))
+		sb.WriteString(`;
 
         location / {
             return 301 https://$host$request_uri;
@@ -468,8 +606,12 @@ events {
 	if len(domainsWithoutCerts) > 0 {
 		sb.WriteString(`    # HTTPS to HTTP redirect for domains without certificates
     server {
-        listen ` + httpsPort + ` ssl;
-        server_name ` + strings.Join(domainsWithoutCerts, " ") + `;
+        listen `)
+		sb.WriteString(httpsPort)
+		sb.WriteString(` ssl;
+        server_name `)
+		sb.WriteString(strings.Join(domainsWithoutCerts, " "))
+		sb.WriteString(`;
 
         # Use a dummy self-signed certificate
         ssl_certificate /etc/nginx/ssl/dummy.crt;
@@ -486,8 +628,9 @@ events {
 `)
 	}
 
-	// Generate server blocks for each base domain (combining proxy routes and static routes)
-	for baseDomain := range allDomains {
+	// Generate server blocks for each base domain (combining proxy routes and static routes),
+	// in proxy.yaml declaration order (orderedDomains).
+	for _, baseDomain := range orderedDomains {
 		routes := domainRoutes[baseDomain]
 		staticSiteRoutes := staticRoutes[baseDomain]
 
@@ -729,7 +872,7 @@ type StreamMapping struct {
 }
 
 // generateStreamBlock generates the nginx stream block for TCP/UDP forwarding
-func generateStreamBlock(mappings []StreamMapping, httpPort, httpsPort string) string {
+func generateStreamBlock(mappings []StreamMapping, httpsPort string) string {
 	var sb strings.Builder
 	sb.WriteString("stream {\n")
 

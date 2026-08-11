@@ -34,6 +34,62 @@ no_trailing_slash:
 	}
 }
 
+func TestLoad_OrderedPorts(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Intentionally non-sorted: 9090, 8080, 7070, with special keys interspersed.
+	proxyYAML := `9090:
+  - d.example.com
+
+cors:
+  api.example.com:
+    allow_origin: "*"
+
+8080:
+  - b.example.com
+  - a.example.com
+
+log:
+  format: text
+
+7070:
+  - c.example.com
+
+no_trailing_slash:
+  - b.example.com
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "proxy.yaml"), []byte(proxyYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(tmpDir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	want := []string{"9090", "8080", "7070"}
+	if len(cfg.OrderedPorts) != len(want) {
+		t.Fatalf("OrderedPorts = %v, want %v", cfg.OrderedPorts, want)
+	}
+	for i, k := range want {
+		if cfg.OrderedPorts[i] != k {
+			t.Fatalf("OrderedPorts = %v, want %v at index %d", cfg.OrderedPorts, want, i)
+		}
+	}
+
+	// Special keys must not survive into OrderedPorts (nor Ports).
+	for _, special := range []string{"cors", "log", "no_trailing_slash"} {
+		if _, ok := cfg.Ports[special]; ok {
+			t.Errorf("%q should not be in Ports", special)
+		}
+		for _, k := range cfg.OrderedPorts {
+			if k == special {
+				t.Errorf("%q should not be in OrderedPorts", special)
+			}
+		}
+	}
+}
+
 func TestParseStaticSiteKey(t *testing.T) {
 	tests := []struct {
 		name      string

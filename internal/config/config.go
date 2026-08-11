@@ -43,7 +43,14 @@ func exampleDir() string {
 	return exampleDirDefault
 }
 
-// CORSConfig represents CORS configuration for a domain or wildcard
+// CORSConfig represents CORS configuration for a domain or wildcard.
+//
+// Fields are merged across matching layers (see nginx.getCORSConfig): a field
+// absent from a higher-priority layer is inherited from lower-priority layers,
+// while a field explicitly set to an empty value ("", null, or []) clears
+// (omits) that header. The "explicitly set" state is tracked per field via the
+// unexported present struct (populated by UnmarshalYAML) and exposed through
+// Presence/SetPresence.
 type CORSConfig struct {
 	AllowOrigin      string   `yaml:"allow_origin"`      // Access-Control-Allow-Origin (default: "*")
 	AllowMethods     []string `yaml:"allow_methods"`     // Access-Control-Allow-Methods
@@ -51,6 +58,72 @@ type CORSConfig struct {
 	ExposeHeaders    []string `yaml:"expose_headers"`    // Access-Control-Expose-Headers
 	MaxAge           int      `yaml:"max_age"`           // Access-Control-Max-Age in seconds (default: 1728000)
 	AllowCredentials bool     `yaml:"allow_credentials"` // Access-Control-Allow-Credentials (default: false)
+
+	present CORSFieldPresence `yaml:"-"`
+}
+
+// CORSFieldPresence records which CORSConfig fields were explicitly set in a
+// YAML layer. It drives field-level merge inheritance.
+type CORSFieldPresence struct {
+	AllowOrigin      bool
+	AllowMethods     bool
+	AllowHeaders     bool
+	ExposeHeaders    bool
+	MaxAge           bool
+	AllowCredentials bool
+}
+
+// Presence reports which fields were explicitly set on this config.
+func (c CORSConfig) Presence() CORSFieldPresence { return c.present }
+
+// SetPresence marks which fields are explicitly set. Used when constructing a
+// merged CORSConfig programmatically.
+func (c *CORSConfig) SetPresence(p CORSFieldPresence) { c.present = p }
+
+// UnmarshalYAML decodes a CORSConfig and records which mapping keys were
+// explicitly present (treating null and "" values as present-and-cleared, so
+// they override inherited values and clear the corresponding header).
+func (c *CORSConfig) UnmarshalYAML(value *yaml.Node) error {
+	type plain struct {
+		AllowOrigin      string   `yaml:"allow_origin"`
+		AllowMethods     []string `yaml:"allow_methods"`
+		AllowHeaders     []string `yaml:"allow_headers"`
+		ExposeHeaders    []string `yaml:"expose_headers"`
+		MaxAge           int      `yaml:"max_age"`
+		AllowCredentials bool     `yaml:"allow_credentials"`
+	}
+	var p plain
+	if err := value.Decode(&p); err != nil {
+		return err
+	}
+	c.AllowOrigin = p.AllowOrigin
+	c.AllowMethods = p.AllowMethods
+	c.AllowHeaders = p.AllowHeaders
+	c.ExposeHeaders = p.ExposeHeaders
+	c.MaxAge = p.MaxAge
+	c.AllowCredentials = p.AllowCredentials
+
+	// A null value still produces a present key in the mapping node, so both
+	// `allow_origin:` (null) and `allow_origin: ""` mark the field as set.
+	if value.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(value.Content); i += 2 {
+			switch value.Content[i].Value {
+			case "allow_origin":
+				c.present.AllowOrigin = true
+			case "allow_methods":
+				c.present.AllowMethods = true
+			case "allow_headers":
+				c.present.AllowHeaders = true
+			case "expose_headers":
+				c.present.ExposeHeaders = true
+			case "max_age":
+				c.present.MaxAge = true
+			case "allow_credentials":
+				c.present.AllowCredentials = true
+			}
+		}
+	}
+	return nil
 }
 
 // LogLevelConfig represents log level configuration for a component
@@ -107,6 +180,12 @@ type Config struct {
 	CORS            map[string]CORSConfig `yaml:"cors"`
 	NoTrailingSlash []string              `yaml:"no_trailing_slash"`
 	Ports           map[string][]string   `yaml:",inline"`
+
+	// OrderedPorts holds the top-level proxy.yaml mapping keys in their file
+	// order (excluding the special cors/log/no_trailing_slash keys). It is
+	// used to emit nginx server blocks deterministically, in declaration order.
+	// Runtime-only (not persisted to YAML).
+	OrderedPorts []string `yaml:"-"`
 
 	// RuntimeStaticSites stores static site information for nginx config generation.
 	// Key is the original config key (e.g., "/app/static" or "[/app/static]/route").
@@ -406,6 +485,12 @@ func Load(configDir string) (*Config, error) {
 		return nil, fmt.Errorf("failed to parse %s: %w", proxyConfigFile, err)
 	}
 
+	// Capture top-level proxy.yaml key order so nginx server blocks can be
+	// emitted deterministically in declaration order.
+	if keys, err := orderedTopLevelKeys(proxyData); err == nil {
+		config.OrderedPorts = keys
+	}
+
 	// Load optional logs config (content is the inner object, without outer 'log:')
 	logsPath := filepath.Join(configDir, logsConfigFile)
 	if data, err := os.ReadFile(logsPath); err == nil {
@@ -431,11 +516,41 @@ func Load(configDir string) (*Config, error) {
 	delete(config.Ports, "log")
 	delete(config.Ports, "no_trailing_slash")
 
+	// Keep only keys that remain valid ports (drops cors/log/no_trailing_slash
+	// and any key not present in Ports), preserving file order.
+	var kept []string
+	for _, k := range config.OrderedPorts {
+		if _, ok := config.Ports[k]; ok {
+			kept = append(kept, k)
+		}
+	}
+	config.OrderedPorts = kept
+
 	if len(config.Ports) == 0 {
 		return nil, fmt.Errorf("config is empty or invalid (%s has no proxy mappings)", proxyConfigFile)
 	}
 
 	return &config, nil
+}
+
+// orderedTopLevelKeys returns the top-level mapping keys of a YAML document in
+// their file order. Non-mapping documents return nil.
+func orderedTopLevelKeys(data []byte) ([]string, error) {
+	var node yaml.Node
+	if err := yaml.Unmarshal(data, &node); err != nil {
+		return nil, err
+	}
+	if len(node.Content) == 0 || node.Content[0].Kind != yaml.MappingNode {
+		return nil, nil
+	}
+	mapping := node.Content[0]
+	var keys []string
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Kind == yaml.ScalarNode {
+			keys = append(keys, mapping.Content[i].Value)
+		}
+	}
+	return keys, nil
 }
 
 // Prepare ensures the configuration directory is ready for loading:
@@ -677,20 +792,6 @@ func ensureFileFromExample(configDir, filename, exampleFilename string) error {
 
 	// Optional files: keep behaviour of ensuring they exist.
 	return os.WriteFile(dst, []byte{}, 0666)
-}
-
-func writeYAMLFile(path string, v any) error {
-	data, err := yaml.Marshal(v)
-	if err != nil {
-		return fmt.Errorf("failed to marshal yaml for %s: %w", filepath.Base(path), err)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0777); err != nil {
-		return fmt.Errorf("failed to create config dir for %s: %w", filepath.Base(path), err)
-	}
-	if err := os.WriteFile(path, data, 0666); err != nil {
-		return fmt.Errorf("failed to write %s: %w", filepath.Base(path), err)
-	}
-	return nil
 }
 
 func fileExists(path string) bool {
