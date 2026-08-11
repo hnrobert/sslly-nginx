@@ -40,6 +40,31 @@ func TestGetCORSConfig(t *testing.T) {
 	}
 }
 
+func TestGetCORSConfigDomainTakesPrecedenceOverWildcard(t *testing.T) {
+	cfg := &config.Config{CORS: map[string]config.CORSConfig{
+		"*":              {AllowOrigin: "*", AllowHeaders: []string{"DNT", "User-Agent"}},
+		"api.example.com": {AllowOrigin: "*", AllowHeaders: []string{"*"}},
+	}}
+
+	// Domain-specific entry must win over the wildcard.
+	cors := getCORSConfig(cfg, "api.example.com")
+	if cors == nil {
+		t.Fatalf("expected non-nil CORS for api.example.com")
+	}
+	if len(cors.AllowHeaders) != 1 || cors.AllowHeaders[0] != "*" {
+		t.Fatalf("expected domain-specific allow_headers [*], got %v", cors.AllowHeaders)
+	}
+
+	// Unrelated domains fall back to the wildcard.
+	other := getCORSConfig(cfg, "other.example.com")
+	if other == nil {
+		t.Fatalf("expected wildcard fallback for other.example.com")
+	}
+	if len(other.AllowHeaders) != 2 || other.AllowHeaders[0] != "DNT" {
+		t.Fatalf("expected wildcard allow_headers, got %v", other.AllowHeaders)
+	}
+}
+
 func TestGenerateCORSHeadersDefault(t *testing.T) {
 	out := generateCORSHeaders(nil)
 	if !strings.Contains(out, "Access-Control-Allow-Origin") {

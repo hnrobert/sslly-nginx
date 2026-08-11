@@ -112,15 +112,16 @@ func (m *Manager) CheckHealth() error {
 	return nil
 }
 
-// getCORSConfig returns the CORS configuration for a given domain
+// getCORSConfig returns the CORS configuration for a given domain.
+// A domain-specific entry takes precedence over the "*" wildcard.
 func getCORSConfig(cfg *config.Config, domain string) *config.CORSConfig {
-	// Check for wildcard first
-	if corsConfig, ok := cfg.CORS["*"]; ok {
+	// Check for exact domain match first (most specific wins)
+	if corsConfig, ok := cfg.CORS[domain]; ok {
 		return &corsConfig
 	}
 
-	// Check for exact domain match
-	if corsConfig, ok := cfg.CORS[domain]; ok {
+	// Fall back to the wildcard entry
+	if corsConfig, ok := cfg.CORS["*"]; ok {
 		return &corsConfig
 	}
 
