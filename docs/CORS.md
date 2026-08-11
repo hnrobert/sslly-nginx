@@ -157,7 +157,6 @@ The CORS configuration generates appropriate Nginx headers. Example output:
 
 ```conf
 # CORS configuration
-add_header 'Access-Control-Allow-Origin' '*' always;
 add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, DELETE' always;
 add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization' always;
 add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;
@@ -175,6 +174,18 @@ if ($request_method = 'OPTIONS') {
 }
 
 ```
+
+> **Why `Access-Control-Allow-Origin` appears only in the OPTIONS block:**
+> Many proxied backends already set this header on actual responses. Adding it
+> again at the location level produces a *duplicate* `Access-Control-Allow-Origin`,
+> which browsers reject with `Access-Control-Allow-Origin cannot contain more than
+> one origin`. So nginx emits `Access-Control-Allow-Origin` only inside the OPTIONS
+> preflight block, where `return 204` short-circuits before `proxy_pass` and the
+> backend is never reached (exactly one Origin). `Allow-Methods` / `Allow-Headers` /
+> `Expose-Headers` stay at the location level because backends typically don't set
+> those. If your backend does **not** send `Access-Control-Allow-Origin` on actual
+> requests, cross-origin actual requests will lack the header — handle CORS in the
+> backend, or strip it with `proxy_hide_header` so nginx owns it fully.
 
 ## Important Notes
 

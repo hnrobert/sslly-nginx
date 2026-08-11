@@ -248,6 +248,36 @@ func TestGenerateCORSHeadersDefault(t *testing.T) {
 	}
 }
 
+func TestGenerateCORSHeaders_OriginOnlyInPreflight(t *testing.T) {
+	// Access-Control-Allow-Origin must be emitted ONLY inside the OPTIONS
+	// preflight block (16-space indent), never at the location level
+	// (12-space indent). Otherwise a proxied backend that also sends the
+	// header produces a duplicate on actual responses.
+	out := generateCORSHeaders(&config.CORSConfig{}) // zero value → all defaults
+
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "            add_header 'Access-Control-Allow-Origin'") {
+			t.Fatalf("Allow-Origin must not be emitted at location level, got:\n%s", out)
+		}
+	}
+
+	if !strings.Contains(out, "                add_header 'Access-Control-Allow-Origin' '*' always;") {
+		t.Fatalf("expected Allow-Origin inside OPTIONS block, got:\n%s", out)
+	}
+
+	// The default (nil) path must also produce a complete preflight (with
+	// Origin/Methods/Headers) and no location-level Origin.
+	defOut := generateCORSHeaders(nil)
+	for _, line := range strings.Split(defOut, "\n") {
+		if strings.HasPrefix(line, "            add_header 'Access-Control-Allow-Origin'") {
+			t.Fatalf("default path: Allow-Origin must not be at location level, got:\n%s", defOut)
+		}
+	}
+	if !strings.Contains(defOut, "                add_header 'Access-Control-Allow-Origin' '*' always;") {
+		t.Fatalf("default path: expected Allow-Origin in OPTIONS block, got:\n%s", defOut)
+	}
+}
+
 func TestGenerateConfigHTTPServerBlock(t *testing.T) {
 	cfg := &config.Config{
 		CORS: map[string]config.CORSConfig{},

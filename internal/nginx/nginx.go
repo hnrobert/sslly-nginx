@@ -206,23 +206,19 @@ func getCORSConfig(cfg *config.Config, domain string) *config.CORSConfig {
 	return &merged
 }
 
-// generateCORSHeaders generates CORS header configuration from CORSConfig
+// generateCORSHeaders generates CORS header configuration from CORSConfig.
+//
+// Access-Control-Allow-Origin is emitted ONLY inside the OPTIONS preflight
+// block, never at the location level. Many proxied backends already send this
+// header on actual responses; emitting it at the location level would produce a
+// duplicate ("Access-Control-Allow-Origin cannot contain more than one origin"
+// in the browser). For the preflight the `return 204` short-circuits before
+// proxy_pass, so the backend is never reached and exactly one Origin is sent.
 func generateCORSHeaders(corsConfig *config.CORSConfig) string {
+	// No cors.yaml entry: use built-in defaults via the resolved path below (a
+	// zero-value CORSConfig with no presence falls back to every default).
 	if corsConfig == nil {
-		// Default CORS configuration
-		return `            # CORS configuration
-            add_header 'Access-Control-Allow-Origin' '*' always;
-            add_header 'Access-Control-Allow-Methods' 'GET, HEAD, POST, PUT, DELETE, CONNECT, OPTIONS, TRACE, PATCH' always;
-            add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization' always;
-            add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;
-
-            # Handle OPTIONS preflight requests
-            if ($request_method = 'OPTIONS') {
-                add_header 'Access-Control-Max-Age' 1728000;
-                add_header 'Content-Type' 'text/plain; charset=utf-8';
-                add_header 'Content-Length' 0;
-                return 204;
-            }`
+		corsConfig = &config.CORSConfig{}
 	}
 
 	// Resolve each header field. A field that was explicitly set to an empty
@@ -269,9 +265,14 @@ func generateCORSHeaders(corsConfig *config.CORSConfig) string {
 
 	var sb strings.Builder
 	sb.WriteString("            # CORS configuration\n")
-	if emitOrigin {
-		sb.WriteString(fmt.Sprintf("            add_header 'Access-Control-Allow-Origin' '%s' always;\n", originVal))
-	}
+	// NOTE: Access-Control-Allow-Origin is intentionally NOT emitted at the
+	// location level. Many proxied backends already send this header on actual
+	// responses; emitting it here would duplicate it and trigger
+	// "Access-Control-Allow-Origin cannot contain more than one origin" in the
+	// browser. Origin is only added inside the OPTIONS preflight block below,
+	// where `return 204` short-circuits before proxy_pass (so the backend is
+	// never reached and there is exactly one Origin). Methods/Headers/Expose
+	// are still emitted here because backends typically don't set those.
 	if emitMethods {
 		sb.WriteString(fmt.Sprintf("            add_header 'Access-Control-Allow-Methods' '%s' always;\n", methodsVal))
 	}
@@ -405,7 +406,7 @@ events {
 
 	// Generate stream block for TCP/UDP if there are any stream mappings
 	if len(streamMappings) > 0 {
-		sb.WriteString(generateStreamBlock(streamMappings, httpPort, httpsPort))
+		sb.WriteString(generateStreamBlock(streamMappings, httpsPort))
 	}
 
 	sb.WriteString(`http {
@@ -556,14 +557,18 @@ events {
 	// Generate default server blocks to handle unconfigured domains
 	sb.WriteString(`    # Default server for HTTP - reject unconfigured domains
     server {
-        listen ` + httpPort + ` default_server;
+        listen `)
+	sb.WriteString(httpPort)
+	sb.WriteString(` default_server;
         server_name _;
         return 444;
     }
 
     # Default server for HTTPS - reject unconfigured domains
     server {
-        listen ` + httpsPort + ` ssl default_server;
+        listen `)
+	sb.WriteString(httpsPort)
+	sb.WriteString(` ssl default_server;
         server_name _;
 
         # Use a dummy self-signed certificate
@@ -582,8 +587,12 @@ events {
 	if len(domainsWithCerts) > 0 {
 		sb.WriteString(`    # HTTP to HTTPS redirect for domains with certificates
     server {
-        listen ` + httpPort + `;
-        server_name ` + strings.Join(domainsWithCerts, " ") + `;
+        listen `)
+		sb.WriteString(httpPort)
+		sb.WriteString(`;
+        server_name `)
+		sb.WriteString(strings.Join(domainsWithCerts, " "))
+		sb.WriteString(`;
 
         location / {
             return 301 https://$host$request_uri;
@@ -597,8 +606,12 @@ events {
 	if len(domainsWithoutCerts) > 0 {
 		sb.WriteString(`    # HTTPS to HTTP redirect for domains without certificates
     server {
-        listen ` + httpsPort + ` ssl;
-        server_name ` + strings.Join(domainsWithoutCerts, " ") + `;
+        listen `)
+		sb.WriteString(httpsPort)
+		sb.WriteString(` ssl;
+        server_name `)
+		sb.WriteString(strings.Join(domainsWithoutCerts, " "))
+		sb.WriteString(`;
 
         # Use a dummy self-signed certificate
         ssl_certificate /etc/nginx/ssl/dummy.crt;
@@ -859,7 +872,7 @@ type StreamMapping struct {
 }
 
 // generateStreamBlock generates the nginx stream block for TCP/UDP forwarding
-func generateStreamBlock(mappings []StreamMapping, httpPort, httpsPort string) string {
+func generateStreamBlock(mappings []StreamMapping, httpsPort string) string {
 	var sb strings.Builder
 	sb.WriteString("stream {\n")
 
