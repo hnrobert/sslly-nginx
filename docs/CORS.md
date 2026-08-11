@@ -79,7 +79,37 @@ You can also configure CORS for specific domains:
   max_age: 86400 # 1 day
 ```
 
+### Wildcard Matching & Precedence
+
+CORS keys support three forms:
+
+| Form             | Example              | Matches                                                                                        |
+| ---------------- | -------------------- | ---------------------------------------------------------------------------------------------- |
+| Exact domain     | `api.example.com`    | Only `api.example.com`                                                                         |
+| Suffix wildcard  | `*.example.com`      | Any subdomain (`api.example.com`, `app.api.example.com`) — **not** the bare apex `example.com` |
+| Catch-all        | `*`                  | Every domain                                                                                   |
+
+When multiple keys match a domain, the **most specific** wins, in this order:
+
+1. Exact domain match
+2. **Longest** matching `*.suffix` (e.g. `*.api.example.com` wins over `*.example.com`)
+3. The `*` catch-all
+
+```yaml
+# Resolution for api.cpu.ibuduan.com (most specific wins):
+'api.cpu.ibuduan.com': { allow_origin: 'https://app.ibuduan.com' }   # 1. exact — wins
+'*.cpu.ibuduan.com':   { allow_origin: 'https://cpu.ibuduan.com' }   # 2. longer suffix
+'*.ibuduan.com':       { allow_origin: '*' }                          # 3. shorter suffix
+'*':                   { allow_origin: '*' }                          # 4. catch-all
+```
+
+> **Note:** A `*.suffix` key matches subdomains only. `*.example.com` will **not** match the bare apex `example.com` — add an exact `example.com` key for that.
+
+This mirrors how TLS certificates are matched (see `FindCertificate`).
+
 ## Generated Nginx Configuration
+
+> **Ordering:** Nginx server blocks are emitted in the declaration order of `proxy.yaml` (top-level key order, then each key's domain list in order). The output is deterministic across reloads.
 
 The CORS configuration generates appropriate Nginx headers. Example output:
 

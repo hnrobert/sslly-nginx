@@ -108,6 +108,12 @@ type Config struct {
 	NoTrailingSlash []string              `yaml:"no_trailing_slash"`
 	Ports           map[string][]string   `yaml:",inline"`
 
+	// OrderedPorts holds the top-level proxy.yaml mapping keys in their file
+	// order (excluding the special cors/log/no_trailing_slash keys). It is
+	// used to emit nginx server blocks deterministically, in declaration order.
+	// Runtime-only (not persisted to YAML).
+	OrderedPorts []string `yaml:"-"`
+
 	// RuntimeStaticSites stores static site information for nginx config generation.
 	// Key is the original config key (e.g., "/app/static" or "[/app/static]/route").
 	// It is runtime-only (not persisted to YAML).
@@ -406,6 +412,12 @@ func Load(configDir string) (*Config, error) {
 		return nil, fmt.Errorf("failed to parse %s: %w", proxyConfigFile, err)
 	}
 
+	// Capture top-level proxy.yaml key order so nginx server blocks can be
+	// emitted deterministically in declaration order.
+	if keys, err := orderedTopLevelKeys(proxyData); err == nil {
+		config.OrderedPorts = keys
+	}
+
 	// Load optional logs config (content is the inner object, without outer 'log:')
 	logsPath := filepath.Join(configDir, logsConfigFile)
 	if data, err := os.ReadFile(logsPath); err == nil {
@@ -431,11 +443,41 @@ func Load(configDir string) (*Config, error) {
 	delete(config.Ports, "log")
 	delete(config.Ports, "no_trailing_slash")
 
+	// Keep only keys that remain valid ports (drops cors/log/no_trailing_slash
+	// and any key not present in Ports), preserving file order.
+	var kept []string
+	for _, k := range config.OrderedPorts {
+		if _, ok := config.Ports[k]; ok {
+			kept = append(kept, k)
+		}
+	}
+	config.OrderedPorts = kept
+
 	if len(config.Ports) == 0 {
 		return nil, fmt.Errorf("config is empty or invalid (%s has no proxy mappings)", proxyConfigFile)
 	}
 
 	return &config, nil
+}
+
+// orderedTopLevelKeys returns the top-level mapping keys of a YAML document in
+// their file order. Non-mapping documents return nil.
+func orderedTopLevelKeys(data []byte) ([]string, error) {
+	var node yaml.Node
+	if err := yaml.Unmarshal(data, &node); err != nil {
+		return nil, err
+	}
+	if len(node.Content) == 0 || node.Content[0].Kind != yaml.MappingNode {
+		return nil, nil
+	}
+	mapping := node.Content[0]
+	var keys []string
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Kind == yaml.ScalarNode {
+			keys = append(keys, mapping.Content[i].Value)
+		}
+	}
+	return keys, nil
 }
 
 // Prepare ensures the configuration directory is ready for loading:
@@ -677,20 +719,6 @@ func ensureFileFromExample(configDir, filename, exampleFilename string) error {
 
 	// Optional files: keep behaviour of ensuring they exist.
 	return os.WriteFile(dst, []byte{}, 0666)
-}
-
-func writeYAMLFile(path string, v any) error {
-	data, err := yaml.Marshal(v)
-	if err != nil {
-		return fmt.Errorf("failed to marshal yaml for %s: %w", filepath.Base(path), err)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0777); err != nil {
-		return fmt.Errorf("failed to create config dir for %s: %w", filepath.Base(path), err)
-	}
-	if err := os.WriteFile(path, data, 0666); err != nil {
-		return fmt.Errorf("failed to write %s: %w", filepath.Base(path), err)
-	}
-	return nil
 }
 
 func fileExists(path string) bool {

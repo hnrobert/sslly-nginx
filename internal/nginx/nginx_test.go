@@ -65,6 +65,70 @@ func TestGetCORSConfigDomainTakesPrecedenceOverWildcard(t *testing.T) {
 	}
 }
 
+func TestGetCORSConfigSuffixWildcard(t *testing.T) {
+	cfg := &config.Config{CORS: map[string]config.CORSConfig{
+		"*.ibuduan.com": {AllowOrigin: "https://app.ibuduan.com", AllowHeaders: []string{"X-Suffix"}},
+	}}
+
+	// Matches a subdomain.
+	cors := getCORSConfig(cfg, "api.cpu.ibuduan.com")
+	if cors == nil || cors.AllowOrigin != "https://app.ibuduan.com" {
+		t.Fatalf("expected *.ibuduan.com to match subdomain, got %+v", cors)
+	}
+
+	// Does NOT match the bare apex.
+	if got := getCORSConfig(cfg, "ibuduan.com"); got != nil {
+		t.Fatalf("*.ibuduan.com must not match bare apex, got %+v", got)
+	}
+
+	// Does NOT match an unrelated domain.
+	if got := getCORSConfig(cfg, "example.com"); got != nil {
+		t.Fatalf("*.ibuduan.com must not match unrelated domain, got %+v", got)
+	}
+}
+
+func TestGetCORSConfigLongestSuffixWins(t *testing.T) {
+	cfg := &config.Config{CORS: map[string]config.CORSConfig{
+		"*.ibuduan.com":     {AllowHeaders: []string{"short"}},
+		"*.cpu.ibuduan.com": {AllowHeaders: []string{"long"}},
+	}}
+
+	cors := getCORSConfig(cfg, "api.cpu.ibuduan.com")
+	if cors == nil || len(cors.AllowHeaders) != 1 || cors.AllowHeaders[0] != "long" {
+		t.Fatalf("expected longest suffix (*.cpu.ibuduan.com) to win, got %+v", cors)
+	}
+
+	// A subdomain of ibuduan.com that is not under cpu gets the shorter rule.
+	cors = getCORSConfig(cfg, "api.ibuduan.com")
+	if cors == nil || cors.AllowHeaders[0] != "short" {
+		t.Fatalf("expected shorter suffix (*.ibuduan.com), got %+v", cors)
+	}
+}
+
+func TestGetCORSConfigExactBeatsSuffix(t *testing.T) {
+	cfg := &config.Config{CORS: map[string]config.CORSConfig{
+		"*.ibuduan.com":      {AllowHeaders: []string{"suffix"}},
+		"api.cpu.ibuduan.com": {AllowHeaders: []string{"exact"}},
+	}}
+
+	cors := getCORSConfig(cfg, "api.cpu.ibuduan.com")
+	if cors == nil || cors.AllowHeaders[0] != "exact" {
+		t.Fatalf("expected exact key to beat suffix, got %+v", cors)
+	}
+}
+
+func TestGetCORSConfigNoMatch(t *testing.T) {
+	cfg := &config.Config{CORS: map[string]config.CORSConfig{
+		"*.ibuduan.com": {AllowOrigin: "https://app.ibuduan.com"},
+	}}
+	if got := getCORSConfig(cfg, "example.com"); got != nil {
+		t.Fatalf("expected nil for unmatched domain, got %+v", got)
+	}
+	if got := getCORSConfig(&config.Config{}, "anything"); got != nil {
+		t.Fatalf("expected nil for nil CORS map, got %+v", got)
+	}
+}
+
 func TestGenerateCORSHeadersDefault(t *testing.T) {
 	out := generateCORSHeaders(nil)
 	if !strings.Contains(out, "Access-Control-Allow-Origin") {
@@ -93,6 +157,32 @@ func TestGenerateConfigHTTPServerBlock(t *testing.T) {
 	}
 	if !strings.Contains(ng, "proxy_pass http://192.168.1.2:5678/api") {
 		t.Fatalf("expected proxy_pass to upstream with path")
+	}
+}
+
+func TestGenerateConfig_ServerBlocksFollowProxyYAMLOrder(t *testing.T) {
+	// Port keys deliberately non-sorted; OrderedPorts declares the desired order.
+	cfg := &config.Config{
+		CORS: map[string]config.CORSConfig{},
+		Ports: map[string][]string{
+			"3030": {"third.example.com"},
+			"1010": {"first.example.com"},
+			"2020": {"second.example.com"},
+		},
+		OrderedPorts: []string{"1010", "2020", "3030"},
+	}
+
+	ng := GenerateConfig(cfg, nil)
+
+	// Each server block is introduced by a comment naming the base domain.
+	idxFirst := strings.Index(ng, "HTTP server block for first.example.com")
+	idxSecond := strings.Index(ng, "HTTP server block for second.example.com")
+	idxThird := strings.Index(ng, "HTTP server block for third.example.com")
+	if idxFirst < 0 || idxSecond < 0 || idxThird < 0 {
+		t.Fatalf("missing one or more server block markers in:\n%s", ng)
+	}
+	if !(idxFirst < idxSecond && idxSecond < idxThird) {
+		t.Fatalf("server blocks not in OrderedPorts order: first=%d second=%d third=%d", idxFirst, idxSecond, idxThird)
 	}
 }
 

@@ -113,14 +113,48 @@ func (m *Manager) CheckHealth() error {
 }
 
 // getCORSConfig returns the CORS configuration for a given domain.
-// A domain-specific entry takes precedence over the "*" wildcard.
+//
+// Resolution order (most specific first):
+//  1. Exact domain key (e.g. "api.example.com")
+//  2. Longest matching "*.suffix" wildcard (e.g. "*.api.example.com" wins over
+//     "*.example.com"). A "*.suffix" key matches subdomains only, never the
+//     bare apex — "*.example.com" matches "api.example.com" but not "example.com".
+//  3. The "*" catch-all key
+//
+// This mirrors ssl.FindCertificate's "*.suffix" handling.
 func getCORSConfig(cfg *config.Config, domain string) *config.CORSConfig {
-	// Check for exact domain match first (most specific wins)
+	if cfg.CORS == nil {
+		return nil
+	}
+	domain = strings.ToLower(strings.TrimSpace(domain))
+
+	// 1. Exact match (highest priority).
 	if corsConfig, ok := cfg.CORS[domain]; ok {
 		return &corsConfig
 	}
 
-	// Fall back to the wildcard entry
+	// 2. Longest matching "*.suffix" wildcard.
+	var best *config.CORSConfig
+	var bestLen int
+	for pat, corsConfig := range cfg.CORS {
+		if !strings.HasPrefix(pat, "*.") {
+			continue
+		}
+		suffix := pat[1:] // ".example.com"
+		// Match subdomains only: skip the bare apex (pat[2:] == "example.com").
+		if domain != pat[2:] && strings.HasSuffix(domain, suffix) {
+			if best == nil || len(suffix) > bestLen {
+				bestLen = len(suffix)
+				match := corsConfig
+				best = &match
+			}
+		}
+	}
+	if best != nil {
+		return best
+	}
+
+	// 3. Catch-all.
 	if corsConfig, ok := cfg.CORS["*"]; ok {
 		return &corsConfig
 	}
@@ -406,9 +440,9 @@ events {
 		}
 	}
 
-	// Collect domains with and without certificates
-	var domainsWithCerts []string
-	var domainsWithoutCerts []string
+	// Build an ordered, de-duplicated list of base domains following the
+	// declaration order of proxy.yaml (cfg.OrderedPorts). This makes server
+	// block emission and the redirect server_name lists deterministic.
 	allDomains := make(map[string]bool)
 	for baseDomain := range domainRoutes {
 		allDomains[baseDomain] = true
@@ -416,7 +450,30 @@ events {
 	for baseDomain := range staticRoutes {
 		allDomains[baseDomain] = true
 	}
-	for baseDomain := range allDomains {
+	var orderedDomains []string
+	seen := make(map[string]bool)
+	for _, key := range cfg.OrderedPorts {
+		for _, domainPath := range cfg.Ports[key] {
+			baseDomain, _ := splitDomainPath(domainPath)
+			if baseDomain == "" || seen[baseDomain] {
+				continue
+			}
+			seen[baseDomain] = true
+			orderedDomains = append(orderedDomains, baseDomain)
+		}
+	}
+	// Defensive fallback: if order info is unavailable, use the map keys so
+	// every configured domain is still emitted.
+	if len(orderedDomains) == 0 {
+		for baseDomain := range allDomains {
+			orderedDomains = append(orderedDomains, baseDomain)
+		}
+	}
+
+	// Collect domains with and without certificates, in declaration order.
+	var domainsWithCerts []string
+	var domainsWithoutCerts []string
+	for _, baseDomain := range orderedDomains {
 		cert, hasCert := ssl.FindCertificate(certMap, baseDomain)
 		if hasCert && cert.KeyPath != "" {
 			domainsWithCerts = append(domainsWithCerts, baseDomain)
@@ -487,8 +544,9 @@ events {
 `)
 	}
 
-	// Generate server blocks for each base domain (combining proxy routes and static routes)
-	for baseDomain := range allDomains {
+	// Generate server blocks for each base domain (combining proxy routes and static routes),
+	// in proxy.yaml declaration order (orderedDomains).
+	for _, baseDomain := range orderedDomains {
 		routes := domainRoutes[baseDomain]
 		staticSiteRoutes := staticRoutes[baseDomain]
 
