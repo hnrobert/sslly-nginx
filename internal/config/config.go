@@ -43,7 +43,14 @@ func exampleDir() string {
 	return exampleDirDefault
 }
 
-// CORSConfig represents CORS configuration for a domain or wildcard
+// CORSConfig represents CORS configuration for a domain or wildcard.
+//
+// Fields are merged across matching layers (see nginx.getCORSConfig): a field
+// absent from a higher-priority layer is inherited from lower-priority layers,
+// while a field explicitly set to an empty value ("", null, or []) clears
+// (omits) that header. The "explicitly set" state is tracked per field via the
+// unexported present struct (populated by UnmarshalYAML) and exposed through
+// Presence/SetPresence.
 type CORSConfig struct {
 	AllowOrigin      string   `yaml:"allow_origin"`      // Access-Control-Allow-Origin (default: "*")
 	AllowMethods     []string `yaml:"allow_methods"`     // Access-Control-Allow-Methods
@@ -51,6 +58,72 @@ type CORSConfig struct {
 	ExposeHeaders    []string `yaml:"expose_headers"`    // Access-Control-Expose-Headers
 	MaxAge           int      `yaml:"max_age"`           // Access-Control-Max-Age in seconds (default: 1728000)
 	AllowCredentials bool     `yaml:"allow_credentials"` // Access-Control-Allow-Credentials (default: false)
+
+	present CORSFieldPresence `yaml:"-"`
+}
+
+// CORSFieldPresence records which CORSConfig fields were explicitly set in a
+// YAML layer. It drives field-level merge inheritance.
+type CORSFieldPresence struct {
+	AllowOrigin      bool
+	AllowMethods     bool
+	AllowHeaders     bool
+	ExposeHeaders    bool
+	MaxAge           bool
+	AllowCredentials bool
+}
+
+// Presence reports which fields were explicitly set on this config.
+func (c CORSConfig) Presence() CORSFieldPresence { return c.present }
+
+// SetPresence marks which fields are explicitly set. Used when constructing a
+// merged CORSConfig programmatically.
+func (c *CORSConfig) SetPresence(p CORSFieldPresence) { c.present = p }
+
+// UnmarshalYAML decodes a CORSConfig and records which mapping keys were
+// explicitly present (treating null and "" values as present-and-cleared, so
+// they override inherited values and clear the corresponding header).
+func (c *CORSConfig) UnmarshalYAML(value *yaml.Node) error {
+	type plain struct {
+		AllowOrigin      string   `yaml:"allow_origin"`
+		AllowMethods     []string `yaml:"allow_methods"`
+		AllowHeaders     []string `yaml:"allow_headers"`
+		ExposeHeaders    []string `yaml:"expose_headers"`
+		MaxAge           int      `yaml:"max_age"`
+		AllowCredentials bool     `yaml:"allow_credentials"`
+	}
+	var p plain
+	if err := value.Decode(&p); err != nil {
+		return err
+	}
+	c.AllowOrigin = p.AllowOrigin
+	c.AllowMethods = p.AllowMethods
+	c.AllowHeaders = p.AllowHeaders
+	c.ExposeHeaders = p.ExposeHeaders
+	c.MaxAge = p.MaxAge
+	c.AllowCredentials = p.AllowCredentials
+
+	// A null value still produces a present key in the mapping node, so both
+	// `allow_origin:` (null) and `allow_origin: ""` mark the field as set.
+	if value.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(value.Content); i += 2 {
+			switch value.Content[i].Value {
+			case "allow_origin":
+				c.present.AllowOrigin = true
+			case "allow_methods":
+				c.present.AllowMethods = true
+			case "allow_headers":
+				c.present.AllowHeaders = true
+			case "expose_headers":
+				c.present.ExposeHeaders = true
+			case "max_age":
+				c.present.MaxAge = true
+			case "allow_credentials":
+				c.present.AllowCredentials = true
+			}
+		}
+	}
+	return nil
 }
 
 // LogLevelConfig represents log level configuration for a component

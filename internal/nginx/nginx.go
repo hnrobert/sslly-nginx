@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -112,15 +113,19 @@ func (m *Manager) CheckHealth() error {
 	return nil
 }
 
-// getCORSConfig returns the CORS configuration for a given domain.
+// getCORSConfig returns the merged CORS configuration for a given domain.
 //
-// Resolution order (most specific first):
-//  1. Exact domain key (e.g. "api.example.com")
-//  2. Longest matching "*.suffix" wildcard (e.g. "*.api.example.com" wins over
-//     "*.example.com"). A "*.suffix" key matches subdomains only, never the
-//     bare apex — "*.example.com" matches "api.example.com" but not "example.com".
-//  3. The "*" catch-all key
+// Matching layers are applied from lowest to highest priority, so a more
+// specific layer overrides (or clears) fields set by a more general one, while
+// fields it leaves unset are inherited:
 //
+//  1. "*" catch-all (lowest priority)
+//  2. "*.suffix" wildcards, shortest suffix first; "*.suffix" matches subdomains
+//     only — "*.example.com" matches "api.example.com" but not "example.com".
+//  3. Exact domain key (highest priority)
+//
+// A field explicitly set to an empty value ("", null, or []) in a higher layer
+// clears (omits) that header in the result; a field left unset is inherited.
 // This mirrors ssl.FindCertificate's "*.suffix" handling.
 func getCORSConfig(cfg *config.Config, domain string) *config.CORSConfig {
 	if cfg.CORS == nil {
@@ -128,38 +133,77 @@ func getCORSConfig(cfg *config.Config, domain string) *config.CORSConfig {
 	}
 	domain = strings.ToLower(strings.TrimSpace(domain))
 
-	// 1. Exact match (highest priority).
-	if corsConfig, ok := cfg.CORS[domain]; ok {
-		return &corsConfig
+	// Collect applicable layers in priority order (lowest first).
+	var layers []config.CORSConfig
+
+	// 1. Catch-all.
+	if c, ok := cfg.CORS["*"]; ok {
+		layers = append(layers, c)
 	}
 
-	// 2. Longest matching "*.suffix" wildcard.
-	var best *config.CORSConfig
-	var bestLen int
-	for pat, corsConfig := range cfg.CORS {
+	// 2. Matching "*.suffix" wildcards, shortest suffix first.
+	type wildcard struct {
+		suffix string
+		cfg    config.CORSConfig
+	}
+	var wildcards []wildcard
+	for pat, c := range cfg.CORS {
 		if !strings.HasPrefix(pat, "*.") {
 			continue
 		}
 		suffix := pat[1:] // ".example.com"
-		// Match subdomains only: skip the bare apex (pat[2:] == "example.com").
 		if domain != pat[2:] && strings.HasSuffix(domain, suffix) {
-			if best == nil || len(suffix) > bestLen {
-				bestLen = len(suffix)
-				match := corsConfig
-				best = &match
-			}
+			wildcards = append(wildcards, wildcard{suffix, c})
 		}
 	}
-	if best != nil {
-		return best
+	sort.SliceStable(wildcards, func(i, j int) bool {
+		return len(wildcards[i].suffix) < len(wildcards[j].suffix)
+	})
+	for _, w := range wildcards {
+		layers = append(layers, w.cfg)
 	}
 
-	// 3. Catch-all.
-	if corsConfig, ok := cfg.CORS["*"]; ok {
-		return &corsConfig
+	// 3. Exact match (highest priority).
+	if c, ok := cfg.CORS[domain]; ok {
+		layers = append(layers, c)
 	}
 
-	return nil
+	if len(layers) == 0 {
+		return nil
+	}
+
+	// Merge: each layer's explicitly-present fields override the accumulator.
+	merged := config.CORSConfig{}
+	presence := config.CORSFieldPresence{}
+	for _, l := range layers {
+		lp := l.Presence()
+		if lp.AllowOrigin {
+			merged.AllowOrigin = l.AllowOrigin
+			presence.AllowOrigin = true
+		}
+		if lp.AllowMethods {
+			merged.AllowMethods = l.AllowMethods
+			presence.AllowMethods = true
+		}
+		if lp.AllowHeaders {
+			merged.AllowHeaders = l.AllowHeaders
+			presence.AllowHeaders = true
+		}
+		if lp.ExposeHeaders {
+			merged.ExposeHeaders = l.ExposeHeaders
+			presence.ExposeHeaders = true
+		}
+		if lp.MaxAge {
+			merged.MaxAge = l.MaxAge
+			presence.MaxAge = true
+		}
+		if lp.AllowCredentials {
+			merged.AllowCredentials = l.AllowCredentials
+			presence.AllowCredentials = true
+		}
+	}
+	merged.SetPresence(presence)
+	return &merged
 }
 
 // generateCORSHeaders generates CORS header configuration from CORSConfig
@@ -181,41 +225,62 @@ func generateCORSHeaders(corsConfig *config.CORSConfig) string {
             }`
 	}
 
-	// Apply defaults
-	allowOrigin := corsConfig.AllowOrigin
-	if allowOrigin == "" {
-		allowOrigin = "*"
+	// Resolve each header field. A field that was explicitly set to an empty
+	// value ("", null, or []) is cleared (omitted); a field left unset by every
+	// matching layer inherits its default.
+	p := corsConfig.Presence()
+
+	const (
+		defaultMethods = "GET, HEAD, POST, PUT, DELETE, CONNECT, OPTIONS, TRACE, PATCH"
+		defaultHeaders = "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization"
+		defaultExpose  = "Content-Length,Content-Range"
+	)
+
+	// resolveSlice: present=false → default; present=true+empty → cleared; else join.
+	resolveSlice := func(present bool, parts []string, sep, def string) (string, bool) {
+		if !present {
+			return def, true
+		}
+		if len(parts) == 0 {
+			return "", false
+		}
+		return strings.Join(parts, sep), true
+	}
+	// resolveStr: present=false → default; present=true+"" → cleared; else value.
+	resolveStr := func(present bool, val, def string) (string, bool) {
+		if !present {
+			return def, true
+		}
+		if val == "" {
+			return "", false
+		}
+		return val, true
 	}
 
-	allowMethods := corsConfig.AllowMethods
-	if len(allowMethods) == 0 {
-		allowMethods = []string{"GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH"}
-	}
-	methodsStr := strings.Join(allowMethods, ", ")
-
-	allowHeaders := corsConfig.AllowHeaders
-	if len(allowHeaders) == 0 {
-		allowHeaders = []string{"DNT", "User-Agent", "X-Requested-With", "If-Modified-Since", "Cache-Control", "Content-Type", "Range", "Authorization"}
-	}
-	headersStr := strings.Join(allowHeaders, ",")
-
-	exposeHeaders := corsConfig.ExposeHeaders
-	if len(exposeHeaders) == 0 {
-		exposeHeaders = []string{"Content-Length", "Content-Range"}
-	}
-	exposeHeadersStr := strings.Join(exposeHeaders, ",")
+	originVal, emitOrigin := resolveStr(p.AllowOrigin, corsConfig.AllowOrigin, "*")
+	methodsVal, emitMethods := resolveSlice(p.AllowMethods, corsConfig.AllowMethods, ", ", defaultMethods)
+	headersVal, emitHeaders := resolveSlice(p.AllowHeaders, corsConfig.AllowHeaders, ",", defaultHeaders)
+	exposeVal, emitExpose := resolveSlice(p.ExposeHeaders, corsConfig.ExposeHeaders, ",", defaultExpose)
 
 	maxAge := corsConfig.MaxAge
-	if maxAge == 0 {
+	if !p.MaxAge {
 		maxAge = 1728000 // 20 days
 	}
 
 	var sb strings.Builder
 	sb.WriteString("            # CORS configuration\n")
-	sb.WriteString(fmt.Sprintf("            add_header 'Access-Control-Allow-Origin' '%s' always;\n", allowOrigin))
-	sb.WriteString(fmt.Sprintf("            add_header 'Access-Control-Allow-Methods' '%s' always;\n", methodsStr))
-	sb.WriteString(fmt.Sprintf("            add_header 'Access-Control-Allow-Headers' '%s' always;\n", headersStr))
-	sb.WriteString(fmt.Sprintf("            add_header 'Access-Control-Expose-Headers' '%s' always;\n", exposeHeadersStr))
+	if emitOrigin {
+		sb.WriteString(fmt.Sprintf("            add_header 'Access-Control-Allow-Origin' '%s' always;\n", originVal))
+	}
+	if emitMethods {
+		sb.WriteString(fmt.Sprintf("            add_header 'Access-Control-Allow-Methods' '%s' always;\n", methodsVal))
+	}
+	if emitHeaders {
+		sb.WriteString(fmt.Sprintf("            add_header 'Access-Control-Allow-Headers' '%s' always;\n", headersVal))
+	}
+	if emitExpose {
+		sb.WriteString(fmt.Sprintf("            add_header 'Access-Control-Expose-Headers' '%s' always;\n", exposeVal))
+	}
 
 	if corsConfig.AllowCredentials {
 		sb.WriteString("            add_header 'Access-Control-Allow-Credentials' 'true' always;\n")
@@ -223,9 +288,15 @@ func generateCORSHeaders(corsConfig *config.CORSConfig) string {
 
 	sb.WriteString("\n            # Handle OPTIONS preflight requests\n")
 	sb.WriteString("            if ($request_method = 'OPTIONS') {\n")
-	sb.WriteString(fmt.Sprintf("                add_header 'Access-Control-Allow-Origin' '%s' always;\n", allowOrigin))
-	sb.WriteString(fmt.Sprintf("                add_header 'Access-Control-Allow-Methods' '%s' always;\n", methodsStr))
-	sb.WriteString(fmt.Sprintf("                add_header 'Access-Control-Allow-Headers' '%s' always;\n", headersStr))
+	if emitOrigin {
+		sb.WriteString(fmt.Sprintf("                add_header 'Access-Control-Allow-Origin' '%s' always;\n", originVal))
+	}
+	if emitMethods {
+		sb.WriteString(fmt.Sprintf("                add_header 'Access-Control-Allow-Methods' '%s' always;\n", methodsVal))
+	}
+	if emitHeaders {
+		sb.WriteString(fmt.Sprintf("                add_header 'Access-Control-Allow-Headers' '%s' always;\n", headersVal))
+	}
 	if corsConfig.AllowCredentials {
 		sb.WriteString("                add_header 'Access-Control-Allow-Credentials' 'true' always;\n")
 	}

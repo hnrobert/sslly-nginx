@@ -107,6 +107,48 @@ When multiple keys match a domain, the **most specific** wins, in this order:
 
 This mirrors how TLS certificates are matched (see `FindCertificate`).
 
+### Layer Inheritance & Clearing
+
+Matching layers are merged field-by-field from the least to the most specific
+(`*` → `*.suffix` shortest → longest → exact). A field you **don't** mention in
+a more specific key is **inherited** from the lower-priority layers, so a
+per-domain entry only needs to state what differs:
+
+```yaml
+'*':
+  allow_origin: '*'
+  allow_methods: [GET, POST]
+  allow_headers: [Content-Type]
+
+'api.example.com':
+  allow_credentials: true   # only this field overrides; the rest is inherited
+```
+
+To **suppress** a header that a lower layer would otherwise emit, set it to an
+empty value (`""` or `null`). An explicitly-empty field is *cleared* — the
+corresponding header is omitted entirely from that domain's server block:
+
+```yaml
+'*':
+  allow_origin: '*'
+  allow_methods: [GET, POST]
+  allow_headers: [Content-Type]
+
+'api.example.com':
+  allow_origin: ''   # ← Access-Control-Allow-Origin is OMITTED for this domain
+                     #   methods (GET, POST) and headers (Content-Type) are inherited
+```
+
+| Field state in the winning layer(s) | Resulting header                         |
+| ----------------------------------- | ---------------------------------------- |
+| Set to a value                      | Emitted with that value                  |
+| Not set in any matching layer       | Inherited, or the built-in default       |
+| Explicitly `""` or `null`           | **Omitted** (cleared)                    |
+
+This applies to `allow_origin`, `allow_methods`, `allow_headers`, and
+`expose_headers`. `max_age` and `allow_credentials` are not clearable (set them
+to the value you want, or omit to inherit/default).
+
 ## Generated Nginx Configuration
 
 > **Ordering:** Nginx server blocks are emitted in the declaration order of `proxy.yaml` (top-level key order, then each key's domain list in order). The output is deterministic across reloads.
