@@ -214,6 +214,12 @@ func getCORSConfig(cfg *config.Config, domain string) *config.CORSConfig {
 // duplicate ("Access-Control-Allow-Origin cannot contain more than one origin"
 // in the browser). For the preflight the `return 204` short-circuits before
 // proxy_pass, so the backend is never reached and exactly one Origin is sent.
+//
+// The preflight block only matches OPTIONS requests that carry an
+// Access-Control-Request-Method header — the signature of a browser CORS
+// preflight. Plain OPTIONS requests (e.g. WebDAV capability discovery by
+// macOS webdavfs) must fall through to proxy_pass so the backend can answer
+// with its own DAV headers; intercepting them breaks WebDAV mounting.
 func generateCORSHeaders(corsConfig *config.CORSConfig) string {
 	// No cors.yaml entry: use built-in defaults via the resolved path below (a
 	// zero-value CORSConfig with no presence falls back to every default).
@@ -287,8 +293,20 @@ func generateCORSHeaders(corsConfig *config.CORSConfig) string {
 		sb.WriteString("            add_header 'Access-Control-Allow-Credentials' 'true' always;\n")
 	}
 
-	sb.WriteString("\n            # Handle OPTIONS preflight requests\n")
+	sb.WriteString("\n            # Handle CORS preflight requests only: an OPTIONS request carrying\n")
+	sb.WriteString("            # an Access-Control-Request-Method header (browser preflight).\n")
+	sb.WriteString("            # Plain OPTIONS (e.g. WebDAV capability discovery) is NOT matched\n")
+	sb.WriteString("            # here and falls through to proxy_pass so the backend can answer\n")
+	sb.WriteString("            # with its own DAV/Allow headers. nginx has no nested if, so the\n")
+	sb.WriteString("            # AND of both conditions is built by string concatenation.\n")
+	sb.WriteString("            set $cors_preflight '';\n")
 	sb.WriteString("            if ($request_method = 'OPTIONS') {\n")
+	sb.WriteString("                set $cors_preflight 'M';\n")
+	sb.WriteString("            }\n")
+	sb.WriteString("            if ($http_access_control_request_method != '') {\n")
+	sb.WriteString("                set $cors_preflight '${cors_preflight}A';\n")
+	sb.WriteString("            }\n")
+	sb.WriteString("            if ($cors_preflight = 'MA') {\n")
 	if emitOrigin {
 		sb.WriteString(fmt.Sprintf("                add_header 'Access-Control-Allow-Origin' '%s' always;\n", originVal))
 	}
