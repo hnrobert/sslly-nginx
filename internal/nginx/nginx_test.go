@@ -278,6 +278,29 @@ func TestGenerateCORSHeaders_OriginOnlyInPreflight(t *testing.T) {
 	}
 }
 
+func TestCORSPlainOptionsPassesThrough(t *testing.T) {
+	// A real browser preflight is OPTIONS + Access-Control-Request-Method.
+	// Plain OPTIONS (WebDAV capability discovery) must NOT be short-circuited
+	// with return 204 — macOS webdavfs refuses to mount a server whose OPTIONS
+	// answer lacks a DAV header, so those requests must reach the backend.
+	out := generateCORSHeaders(nil)
+
+	if !strings.Contains(out, "$http_access_control_request_method") {
+		t.Fatalf("preflight match must require Access-Control-Request-Method, got:\n%s", out)
+	}
+	if !strings.Contains(out, "if ($cors_preflight = 'MA') {") {
+		t.Fatalf("expected AND-condition preflight block, got:\n%s", out)
+	}
+
+	// The bare method-only branch must only set the flag, never add_header or
+	// return: a return inside `if ($request_method = 'OPTIONS')` is the exact
+	// bug that broke WebDAV.
+	methodIf := "if ($request_method = 'OPTIONS') {\n                set $cors_preflight 'M';\n            }"
+	if !strings.Contains(out, methodIf) {
+		t.Fatalf("method-only branch must only set the flag, got:\n%s", out)
+	}
+}
+
 func TestGenerateConfigHTTPServerBlock(t *testing.T) {
 	cfg := &config.Config{
 		CORS: map[string]config.CORSConfig{},
