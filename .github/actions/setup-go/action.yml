@@ -10,7 +10,7 @@ runs:
   using: "composite"
   steps:
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v7
       with:
         go-version: ${{ inputs.go-version }}
 
@@ -27,7 +27,7 @@ runs:
         mkdir -p "${RUNNER_TEMP}/gomodcache_cache"
 
     - name: Cache Go modules
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ${{ steps.cacheprep.outputs.cache_tmp }}
