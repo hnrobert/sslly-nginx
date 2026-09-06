@@ -2,8 +2,8 @@
 
 A smart Nginx SSL reverse proxy manager that automatically configures SSL certificates and proxies traffic to your local applications.
 
-> I HATE writing Nginx config, that's why this project was born.  
-> Just tell this tool the port and domain, and let it handle the rest.  
+> I HATE writing Nginx config, that's why this project was born.
+> Just tell this tool the port and domain, and let it handle the rest.
 
 <!-- markdownlint-disable-next-line MD033 -->
 > <p align="right"><strong>Robert He</strong></p>
@@ -17,6 +17,7 @@ A smart Nginx SSL reverse proxy manager that automatically configures SSL certif
 - **SSL Management**: Automatically scans and maps SSL certificates to domains
 - **Hot Reload**: Updates Nginx configuration without downtime when files change
 - **Error Recovery**: Maintains the last working configuration and rolls back on failures
+- **Web Control API**: gRPC + HTTP/JSON API with multi-user RBAC to manage everything remotely
 - **Docker Ready**: Runs as a containerized service with Docker Compose
 - **FRP Friendly**: Easy integration with FRP for secure remote access to local services
 
@@ -25,10 +26,12 @@ A smart Nginx SSL reverse proxy manager that automatically configures SSL certif
 - [x] HTTP and HTTPS proxying
 - [x] Automatic HTTP → HTTPS redirection for domains with valid certificates
 - [x] TCP and UDP stream forwarding
+- [x] Static site hosting
+- [x] WebSocket support
 - [x] CORS configuration (optional)
 - [x] Custom log levels and formats (optional)
-- [x] WebSocket support
-- [x] Static site hosting
+- [x] Web control API with per-user read/write scopes
+- [x] Generated client SDKs for Go / TypeScript / Python / .NET
 
 ## Quick Start
 
@@ -48,9 +51,17 @@ docker-compose up -d
 
 The service will start with default configuration and create `configs/` and `ssl/` directories.
 
-### Customize Configuration
+### Add Your First Route
 
-Edit `configs/proxy.yaml` to add your routes:
+Edit `configs/proxy.yaml` — map an upstream to the domains that route to it:
+
+```yaml
+# proxy traffic for example.com to localhost:8080
+8080:
+  - example.com
+```
+
+The watcher picks the change up within a second and hot-reloads nginx (with validation and automatic rollback).
 
 ```bash
 # View logs
@@ -62,9 +73,9 @@ docker-compose down
 
 ### Add SSL Certificates
 
-Drop certificate files into the `ssl/` directory:
+Drop certificate files into the `ssl/` directory — the app matches `.crt`/`.key` pairs by the domains inside the certificates, not by filename:
 
-```text
+```bash
 ssl/
 ├── example.com.crt
 ├── example.com.key
@@ -73,13 +84,18 @@ ssl/
 
 ## Documentation
 
-- [Configuration Reference](docs/CONFIG_REFERENCE.md) - Complete configuration format and rules
-- [CORS Configuration](docs/CORS.md) - Comprehensive CORS setup and best practices
-- [FRP Integration](docs/FRP.md) - Set up FRP for remote access to local services
+| Doc | Contents |
+| --- | --- |
+| [Configuration Reference](docs/CONFIG_REFERENCE.md) | Complete `proxy.yaml` format, keys, validation rules, env vars |
+| [CORS Configuration](docs/CORS.md) | CORS rules, wildcard matching, inheritance & clearing |
+| [Control API Reference](docs/API.md) | Endpoints, auth, RBAC semantics, mutation pipeline |
+| [Client SDKs](docs/SDK.md) | Install & use the generated Go/TS/Python/.NET SDKs |
+| [Manual nginx Edits](docs/MANUAL_NGINX_EDIT.md) | Safely hand-edit the generated nginx.conf |
+| [FRP Integration](docs/FRP.md) | Expose local services through an FRP server |
 
 ## Configuration
 
-### Configuration Format Summary
+### Format Summary
 
 ```yaml
 upstream_key:
@@ -87,37 +103,11 @@ upstream_key:
   - listener_key_2
 ```
 
-### upstream_key Format
-
-```md
-<upstream_protocol>domain:port/routes
-```
-
-or for static sites:
-
-```md
-static_route//additional/routes
-```
-
-| Component | Required | Default | Description |
-| ----------- | ---------- | --------- | ------------- |
-| `upstream_protocol` | No | `http` | `https`, `tcp`, `udp` (omit for `http`) |
-| `domain` | No | `127.0.0.1` | IP or hostname (IPv6: `[::1]`) |
-| `port` | No | Protocol default | Port number |
-| `routes` | No | - | URL path routing |
-| `static_route` | - | - | Path representing www root location in filesystem starting with `/` or `.` or `..` (`.` = `/app`) |
-
-### listener_key Format
-
-```md
-<listen_protocol>listened_server_name|listened_port
-```
-
-| Component | Required | Default | Description |
-| ----------- | ---------- | --------- | ------------- |
-| `listen_protocol` | No | Smart mode | `http`, `https`, `tcp`, `udp` |
-| `listened_server_name` | No | All interfaces | Server name (domain) |
-| `listened_port` | No | Env var ports | Listen port |
+An `upstream_key` names the backend (`8080`, `192.168.50.2:1234`, `<https>host:8443`,
+`<tcp>9122`, or a static-site directory); `listener_key` entries name what
+routes to it (`example.com`, `example.com/api`, `example.com|8443`,
+`<http>example.com`). The full grammar and defaults live in the
+[Configuration Reference](docs/CONFIG_REFERENCE.md).
 
 ### Quick Examples
 
@@ -147,13 +137,12 @@ static_route//additional/routes
   - docs.example.com
 ```
 
-For complete format specification and advanced examples, see [Configuration Reference](docs/CONFIG_REFERENCE.md).
-
 ### Optional Configuration Files
 
-#### CORS Configuration
+#### CORS (`cors.yaml`)
 
-Configure CORS (Cross-Origin Resource Sharing) settings globally or per-domain.
+Configure CORS settings globally (`*`), per suffix (`*.example.com`), or per
+exact domain, with field inheritance and explicit clearing:
 
 ```yaml
 api.example.com:
@@ -163,69 +152,22 @@ api.example.com:
   allow_credentials: true
 ```
 
-For more please check [CORS Configuration](docs/CORS.md) for comprehensive CORS setup guide and best practices examples.
+Full guide: [CORS Configuration](docs/CORS.md).
 
-#### Control API Users
+#### Log levels (`logs.yaml`)
 
-The web control API (below) authenticates bearers against `configs/users.yaml`
+Separate levels for the app and for nginx (including stderr mapping). See the
+env/files table in the [Configuration Reference](docs/CONFIG_REFERENCE.md#environment-variables).
+
+#### Control API users (`users.yaml`)
+
+The web control API authenticates bearers against `configs/users.yaml`
 (SHA-256 token hashes; multi-user, per-surface/per-scope read-write
 permissions). The file is bootstrapped automatically on first boot — set
 `SSLLY_API_ADMIN_TOKEN` or watch the log for the one-time random admin token.
 See [Control API Reference](docs/API.md) for the full schema and semantics.
 
-### SSL Certificate Structure
-
-Place SSL certificates in the `ssl/` directory. The application automatically matches certificate files (`.crt`) with their corresponding private key files (`.key`) based on the domain information contained within the SSL certificates themselves.
-
-```bash
-ssl/
-├── production/
-│   ├── example.com_bundle.crt
-│   └── example.com_bundle.key
-├── staging/
-│   ├── staging.example.com.crt
-│   └── staging.example.com.key
-└── api.example.com.crt
-    └── api.example.com.key
-```
-
-**Important Notes**:
-
-- Duplicate certificates are allowed for each domain, If multiple pairs of certificate+key are found, the farthest expiration time is selected.
-- Certificate and key files are optional (a domain without a matched cert/key will be served over HTTP)
-- **SSL certificates are optional**: If no certificate is found for a domain, the service will proxy HTTP traffic directly to your applications
-- **HTTPS to HTTP redirect**: If HTTPS is accessed for domains without valid certificates, traffic is redirected to HTTP (301)
-
-### Backup & Crash Recovery
-
-To make hot-reloads safer, `sslly-nginx` keeps a persistent on-disk snapshot of the last known-good configuration.
-
-- Backup folder: `configs/.sslly-backups/`
-- Snapshot content: `configs/` + `ssl/` + generated `/etc/nginx/nginx.conf`
-- Runtime cache: The currently used cert/key files are copied into `configs/.sslly-runtime/current/` and nginx.conf only references that cache, so edits under `ssl/` won't affect the running nginx process until a successful reload.
-
-Crash detection: If the previous run died mid-reload, the next start detects the unfinished reload and automatically restores the last known-good snapshot.
-
-### HTTP-Only Mode
-
-If you don't have SSL certificates yet but want to serve some domains over HTTP only:
-
-1. The application will automatically detect missing certificates
-2. Domains without certificates will be served over HTTP (no redirect)
-3. Domains with certificates will use HTTPS with automatic HTTP → HTTPS redirect
-4. **HTTPS fallback**: If someone accesses HTTPS for a domain without a valid certificate, they'll be redirected to HTTP with a 301 status
-5. You can mix HTTP and HTTPS domains in the same configuration
-
-Example scenario:
-
-```yaml
-# proxy.yaml
-1234:
-  - secure.example.com # Has certificate → HTTPS
-  - dev.example.com # No certificate → HTTP only
-```
-
-## Features in Detail
+## Runtime Behaviour
 
 ### Automatic HTTPS Redirect
 
@@ -234,6 +176,15 @@ When SSL certificates are detected:
 - All HTTP traffic for domains **with certificates** is automatically redirected to HTTPS
 - HTTPS traffic for domains **without certificates** is redirected to HTTP (301) to avoid certificate errors
 - If no certificates are found for any domain, HTTP traffic is proxied directly to your applications
+
+You can mix HTTP and HTTPS domains in the same configuration:
+
+```yaml
+# proxy.yaml
+1234:
+  - secure.example.com # Has certificate → HTTPS
+  - dev.example.com # No certificate → HTTP only
+```
 
 ### Hot Reload
 
@@ -250,6 +201,16 @@ When changes are detected:
 2. Nginx configuration is tested
 3. If valid, Nginx is reloaded
 4. If invalid, the previous working configuration is restored (including on-disk `configs/` + `ssl/` contents)
+
+### Backup & Crash Recovery
+
+To make hot-reloads safer, `sslly-nginx` keeps a persistent on-disk snapshot of the last known-good configuration.
+
+- Backup folder: `configs/.sslly-backups/`
+- Snapshot content: `configs/` + `ssl/` + generated `/etc/nginx/nginx.conf`
+- Runtime cache: The currently used cert/key files are copied into `configs/.sslly-runtime/current/` and nginx.conf only references that cache, so edits under `ssl/` won't affect the running nginx process until a successful reload.
+
+Crash detection: If the previous run died mid-reload, the next start detects the unfinished reload and automatically restores the last known-good snapshot.
 
 ### Logs: Domain Summary
 
@@ -270,7 +231,14 @@ On startup and after every successful reload, the service prints a single domain
    - Restores the last working configuration
    - Continues running with previous settings
 
-### Web Control API
+### Certificate Handling Notes
+
+- Duplicate certificates are allowed for each domain, If multiple pairs of certificate+key are found, the farthest expiration time is selected.
+- Certificate and key files are optional (a domain without a matched cert/key will be served over HTTP)
+- **SSL certificates are optional**: If no certificate is found for a domain, the service will proxy HTTP traffic directly to your applications
+- **HTTPS to HTTP redirect**: If HTTPS is accessed for domains without valid certificates, traffic is redirected to HTTP (301)
+
+## Web Control API
 
 A gRPC + HTTP/JSON control API for reading and mutating the YAML
 configuration over POST requests (proxy routes, CORS rules, log settings, and
@@ -282,24 +250,10 @@ rolling back automatically when nginx rejects the result.
 Environment variables: `SSLLY_API_HTTP_ADDR` (default `:9080`, JSON),
 `SSLLY_API_GRPC_ADDR` (default `:9081`, native gRPC), and
 `SSLLY_API_ADMIN_TOKEN` (bootstrap admin token on first boot). Full reference:
-[docs/API.md](docs/API.md).
+[docs/API.md](docs/API.md) — client SDKs for Go/TypeScript/Python/.NET:
+[docs/SDK.md](docs/SDK.md).
 
-## Testing
-
-Run unit tests:
-
-```bash
-make generate   # regenerates gen/ from proto/ (requires buf: brew install buf)
-go test ./...
-```
-
-Run tests with coverage:
-
-```bash
-go test ./... -coverprofile=coverage.out
-go tool cover -func=coverage.out
-go tool cover -html=coverage.out -o coverage.html
-```
+## Built-in Proxy Behaviour
 
 ### WebSocket Support
 
@@ -384,32 +338,26 @@ For detailed FRP integration guide, see [docs/FRP.md](docs/FRP.md).
 
 ## Development
 
-### Build Locally
+### Build & Test
 
 ```bash
-# Build the binary
-make build
-
-# Run tests
-make test
-
-# Run tests with coverage
-make test-coverage
-
-# Format code
-make fmt
-
-# Run linter
-make lint
+make build           # generate proto code + build ./bin/sslly-nginx
+make test            # generate + run tests with -race
+make test-coverage   # tests with coverage report
+make fmt             # gofmt
+make lint            # go vet
 ```
+
+`make generate` regenerates code for every language (Go server + TS/Python/C#
+reference SDKs) via Buf remote plugins; `make generate-go` is the fast
+server-only path most targets use. Buf CLI is required (`brew install buf`).
 
 ### Build Docker Image
 
 ```bash
-# Build image
 make docker-build
 
-# Or use Docker directly
+# Or use Docker directly (requires `make generate-go` first — gen/ is gitignored)
 docker build -t sslly-nginx:latest .
 ```
 
@@ -422,53 +370,28 @@ make run
 
 ## CI/CD Workflows
 
-The project includes three GitHub Actions workflows:
-
-### 1. CI Workflow (`ci.yml`)
-
-- **Triggers**: All branch pushes and pull requests
-- **Actions**:
-   - Build the application
-   - Run tests
-   - Run linter and format checks
-- **No Docker image is built**
-
-### 2. Docker Build Workflow (`docker-build.yml`)
-
-- **Triggers**: Pushes to `main` and `develop` branches
-- **Actions**:
-   - Run tests
-   - Build Docker image
-   - Push to `ghcr.io`
-- **Tags**:
-   - `main` branch → `latest` tag
-   - `develop` branch → `develop` tag
-
-### 3. Release Workflow (`release.yml`)
-
-- **Triggers**:
-   - Git tag push (e.g., `v1.0.0`)
-   - Manual workflow dispatch
-- **Actions**:
-   - Create tag (if workflow_dispatch)
-   - Run tests
-   - Build and push Docker image with version tag
-   - Create GitHub release
+| Workflow | Trigger | What it does |
+| --- | --- | --- |
+| `test.yml` | Pull requests (path-filtered) | Tests, vet, gofmt gate, proto lint + **breaking** check, multi-language codegen smoke test |
+| `docker-build.yml` | Push to `main`/`develop` (path-filtered) | Tests, build & push image to `ghcr.io` (`latest` / `develop` tags) |
+| `release.yml` | `v*` tag push or manual dispatch | Tests, Docker image with version tags, GitHub Release, and proto module push to the [BSR](https://buf.build/sslly-nginx/sslly-nginx) (tag label) |
+| `sync-develop.yml` | Push to `main` | Fast-forwards `develop` from `main` |
 
 ## Docker Compose Configuration
 
 The `docker-compose.yml` is configured with:
 
-- **Network Mode**: `host` - Uses host networking for direct port access
-- **Restart Policy**: `on-failure` - Stops on errors, auto-starts on system boot
-- **Volumes**:
-   - `./configs:/app/configs:ro` - Configuration (read-only)
-   - `./ssl:/app/ssl:ro` - SSL certificates (read-only)
+- **Network Mode**: `host` — direct port access on the host network
+- **Restart Policy**: `always`
+- **Volumes**: `./configs`, `./ssl`, `./logs`, `./static` mounted at `/app/*`
 
 ### Environment Variables
 
-- `SSLLY_DEFAULT_HTTP_LISTEN_PORT` (default: `80`) — port Nginx listens for HTTP and redirect to HTTPS
+- `SSLLY_DEFAULT_HTTP_LISTEN_PORT` (default: `80`) — port Nginx listens for HTTP and redirects to HTTPS
 - `SSLLY_DEFAULT_HTTPS_LISTEN_PORT` (default: `443`) — port Nginx listens for HTTPS
+- `SSLLY_API_HTTP_ADDR` (default: `:9080`) — control API HTTP/JSON endpoint
+- `SSLLY_API_GRPC_ADDR` (default: `:9081`) — control API native gRPC endpoint
+- `SSLLY_API_ADMIN_TOKEN` — bootstrap admin token, hashed into `configs/users.yaml` on first boot
 
 > **Note:** The legacy environment variables `SSL_NGINX_HTTP_PORT` and `SSL_NGINX_HTTPS_PORT` are still supported for backward compatibility but are deprecated.
 
@@ -487,62 +410,28 @@ docker-compose logs -f sslly-nginx
 docker-compose logs --tail=100 sslly-nginx
 ```
 
-Nginx access and error logs are automatically forwarded to stdout/stderr and visible via `docker logs`
-
 ## Project Structure
 
 ```bash
 sslly-nginx/
-├── cmd/
-│   └── sslly-nginx/
-│       └── main.go              # Application entry point
+├── cmd/sslly-nginx/          # Application entry point
 ├── internal/
-│   ├── app/
-│   │   └── app.go               # Application logic
-│   ├── config/
-│   │   ├── config.go            # Configuration loader
-│   │   └── config_test.go
-│   ├── nginx/
-│   │   └── nginx.go             # Nginx management
-│   ├── ssl/
-│   │   ├── ssl.go               # Certificate scanner
-│   │   └── ssl_test.go
-│   └── watcher/
-│       └── watcher.go           # File system watcher
-├── .github/
-│   └── workflows/
-│       ├── ci.yml               # CI pipeline
-│       ├── docker-build.yml     # Docker build pipeline
-│       └── release.yml          # Release pipeline
-├── configs/
-│   ├── proxy.yaml               # Proxy mappings (required)
-│   ├── cors.yaml                # Optional CORS settings
-│   ├── logs.yaml                # Optional log settings
-│   ├── proxy.example.yaml       # Example proxy mappings
-│   ├── cors.example.yaml        # Example CORS settings
-│   └── logs.example.yaml        # Example log settings
-├── ssl/
-│   └── README.md                # SSL certificate guide
-├── Dockerfile                   # Docker image definition
-├── docker-compose.yml           # Docker Compose configuration
-├── Makefile                     # Build automation
-├── go.mod                       # Go module definition
-└── README.md                    # This file
-```
-
-## Logging
-
-The application logs important events:
-
-- Configuration changes detected
-- Certificate scanning results
-- Nginx reload success/failure
-- Error details with recovery actions
-
-Logs can be viewed with:
-
-```bash
-docker-compose logs -f
+│   ├── api/                  # Control API: gRPC + gateway, auth, RBAC
+│   ├── app/                  # Lifecycle, reload pipeline, watchers
+│   ├── backup/               # Snapshot / crash-recovery manager
+│   ├── config/               # YAML loading, users store, comment-preserving editor
+│   ├── logger/               # Logging facade
+│   ├── nginx/                # nginx.conf generation + process control
+│   ├── ssl/                  # Certificate scanner
+│   └── watcher/              # fsnotify wrapper
+├── proto/                    # Buf module (published as buf.build/sslly-nginx/sslly-nginx)
+├── gen/                      # Generated Go code (gitignored, `make generate-go`)
+├── docs/                     # CONFIG_REFERENCE / CORS / API / SDK / FRP / MANUAL_NGINX_EDIT
+├── configs/*.example.yaml    # Reference configs shipped with the image
+├── .github/workflows/        # test / docker-build / release / sync-develop
+├── Dockerfile
+├── docker-compose.yml
+└── Makefile
 ```
 
 ## Troubleshooting
