@@ -1,8 +1,11 @@
 # Buf module config (v2). Run `buf lint` and
 # `buf breaking --against '.git#branch=main'` in CI (fetch-depth: 0).
+# The module is pushed to the BSR as buf.build/sslly-nginx/sslly-nginx, which
+# hosts generated SDKs for Go/npm/Python/NuGet consumers (see docs/SDK.md).
 version: v2
 modules:
-  - path: .
+  - name: buf.build/sslly-nginx/sslly-nginx
+    path: .
 lint:
   use:
     - STANDARD

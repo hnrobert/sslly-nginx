@@ -1,0 +1,64 @@
+name: Buf Push
+
+# Publishes the proto module to the Buf Schema Registry
+# (buf.build/sslly-nginx/sslly-nginx), which hosts generated SDKs for
+# Go/npm/Python/NuGet consumers — see docs/SDK.md.
+#
+# One-time setup: create a token at https://buf.build/settings and run
+#   gh secret set BUF_TOKEN --body "<token>"
+# The module (buf.build/sslly-nginx/sslly-nginx, public) was created once via
+# `buf registry module create` — BSR requires repositories under an organization.
+#
+# Explicit steps instead of buf-action's default push: this repo's standard is
+# path-filtered, deterministic workflows, and the tag job must attach
+# --label <tag> exactly. Re-pushing identical content is a BSR no-op
+# (commit squash), so all steps are idempotent.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "proto/**"
+      - ".github/workflows/buf-push.yml"
+  workflow_dispatch:
+    inputs:
+      label:
+        description: "Label for the pushed commit (e.g. v1.2.3)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  push:
+    name: Push module to BSR
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Buf
+        uses: bufbuild/buf-action@v1
+        with:
+          setup_only: true # install buf + login only; push steps below are explicit
+          token: ${{ secrets.BUF_TOKEN }}
+
+      - name: Push (default label)
+        if: github.ref == 'refs/heads/main'
+        run: cd proto && buf push --error-format github-actions
+
+      - name: Push (tag label)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: >
+          cd proto && buf push
+          --label "${GITHUB_REF_NAME}"
+          --source-control-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
+          --error-format github-actions
+
+      - name: Push (manual dispatch, custom label)
+        if: github.event_name == 'workflow_dispatch' && inputs.label != ''
+        run: >
+          cd proto && buf push
+          --label "${{ inputs.label }}"
+          --error-format github-actions

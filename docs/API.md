@@ -17,6 +17,14 @@ body.
 The compose file binds both ports on the host network. `GET /healthz` on the
 HTTP port answers unauthenticated `{"status":"ok"}` for probes.
 
+### Client SDKs
+
+The protobuf contract is published to the
+[Buf Schema Registry](https://buf.build/sslly-nginx/sslly-nginx), which builds
+and hosts generated SDKs for Go, TypeScript, Python, and .NET — other
+projects install a package and call the API, no protoc needed. Quickstarts
+for every language: [SDK.md](SDK.md).
+
 ## Authentication
 
 Every call needs a bearer token:

@@ -1,0 +1,18 @@
+# C# codegen template — reference for .NET consumers and a CI smoke test.
+# The namespace is owned here (managed mode), and the gRPC client is kept
+# (external consumers are clients). Consumers can copy this file and run
+# `buf generate buf.build/sslly-nginx/sslly-nginx` — the tokenless fallback
+# when the hosted NuGet feed's token requirement is unwanted (docs/SDK.md).
+version: v2
+managed:
+  enabled: true
+  disable:
+    - module: buf.build/googleapis/googleapis
+  override:
+    - file_option: csharp_namespace
+      value: Hnrobert.Sslly.V1
+plugins:
+  - remote: buf.build/protocolbuffers/csharp
+    out: ../sdks/csharp/gen
+  - remote: buf.build/grpc/csharp
+    out: ../sdks/csharp/gen

@@ -1,0 +1,18 @@
+# TypeScript codegen template — reference for TS consumers and a CI smoke
+# test (regenerated-outputs variant: sdks/ is gitignored, `make generate`
+# recreates it). Managed mode owns options centrally; remote plugins only.
+# Consumers can copy this file and run `buf generate buf.build/sslly-nginx/sslly-nginx`
+# when they need custom options; otherwise prefer the hosted npm package
+# (see docs/SDK.md).
+version: v2
+managed:
+  enabled: true
+  disable:
+    - module: buf.build/googleapis/googleapis
+plugins:
+  - remote: buf.build/bufbuild/es
+    out: ../sdks/ts/gen
+    opt: target=ts
+  - remote: buf.build/connectrpc/es
+    out: ../sdks/ts/gen
+    opt: target=ts

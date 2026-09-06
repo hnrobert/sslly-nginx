@@ -53,6 +53,9 @@ gen/
 *.pb.go
 *.pb.gw.go
 
+# Generated SDK code for non-Go consumers (regenerate with `make generate`)
+sdks/
+
 # Keep example files
 !configs/*.example.yaml
 !ssl/README.md

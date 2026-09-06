@@ -30,6 +30,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # buf breaking walks git history
 
       - name: Setup Go with cache
         uses: ./.github/actions/setup-go
@@ -37,7 +39,10 @@ jobs:
           go-version: "1.25"
 
       - name: Setup Buf
-        uses: bufbuild/buf-setup-action@v1
+        uses: bufbuild/buf-action@v1
+        with:
+          setup_only: true # buf-setup-action is deprecated; token lifts remote-plugin rate limits
+          token: ${{ secrets.BUF_TOKEN }}
 
       - name: Generate protobuf code
         run: make generate
@@ -61,3 +66,6 @@ jobs:
 
       - name: Lint protos
         run: make proto-lint
+
+      - name: Check breaking changes
+        run: make proto-breaking
