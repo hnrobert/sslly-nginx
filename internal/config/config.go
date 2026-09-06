@@ -25,6 +25,14 @@ const (
 	logsExampleFile  = "logs.example.yaml"
 )
 
+// Exported live config file names, used by the control API layer.
+const (
+	ProxyConfigFile = proxyConfigFile
+	CorsConfigFile  = corsConfigFile
+	LogsConfigFile  = logsConfigFile
+	UsersConfigFile = usersConfigFile
+)
+
 // Protocol represents the protocol type for listen/upstream configuration
 type Protocol string
 
@@ -603,17 +611,17 @@ func migrateLegacyConfigIfPresent(configDir string) error {
 
 		// Extract cors/log blocks (if any). These files contain the inner object, without outer 'cors:'/'log:'.
 		if corsDoc != nil && !fileExists(corsPath) {
-			if err := writeYAMLNodeFile(corsPath, corsDoc); err != nil {
+			if err := WriteYAMLNodeFile(corsPath, corsDoc); err != nil {
 				return err
 			}
 		}
 		if logsDoc != nil && !fileExists(logsPath) {
-			if err := writeYAMLNodeFile(logsPath, logsDoc); err != nil {
+			if err := WriteYAMLNodeFile(logsPath, logsDoc); err != nil {
 				return err
 			}
 		}
 		if !fileExists(proxyPath) {
-			if err := writeYAMLNodeFile(proxyPath, proxyDoc); err != nil {
+			if err := WriteYAMLNodeFile(proxyPath, proxyDoc); err != nil {
 				return err
 			}
 		}
@@ -736,7 +744,10 @@ func joinComments(a, b string) string {
 	return a + "\n" + b
 }
 
-func writeYAMLNodeFile(path string, doc *yaml.Node) error {
+// WriteYAMLNodeFile encodes a yaml.Node to path with 2-space indent,
+// preserving node comments. Used by the legacy migration and the control API
+// editor.
+func WriteYAMLNodeFile(path string, doc *yaml.Node) error {
 	if doc == nil {
 		return fmt.Errorf("failed to write %s: nil yaml document", filepath.Base(path))
 	}
@@ -758,6 +769,45 @@ func writeYAMLNodeFile(path string, doc *yaml.Node) error {
 	if err := enc.Close(); err != nil {
 		return fmt.Errorf("failed to finalize yaml for %s: %w", filepath.Base(path), err)
 	}
+	return nil
+}
+
+// WriteYAMLNodeFileAtomic encodes a yaml.Node to path via a temp file and an
+// atomic rename, so readers (and fsnotify) never observe a half-written file.
+func WriteYAMLNodeFileAtomic(path string, doc *yaml.Node) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0777); err != nil {
+		return fmt.Errorf("failed to create config dir for %s: %w", filepath.Base(path), err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-"+filepath.Base(path)+"-*")
+	if err != nil {
+		return fmt.Errorf("failed to stage write of %s: %w", filepath.Base(path), err)
+	}
+	tmpName := tmp.Name()
+	defer func() {
+		if tmpName != "" {
+			_ = os.Remove(tmpName) // no-op after a successful rename
+		}
+	}()
+
+	enc := yaml.NewEncoder(tmp)
+	enc.SetIndent(2)
+	err = enc.Encode(doc)
+	_ = enc.Close()
+	if err != nil {
+		tmp.Close()
+		return fmt.Errorf("failed to encode yaml for %s: %w", filepath.Base(path), err)
+	}
+	if err := tmp.Chmod(0666); err != nil {
+		tmp.Close()
+		return fmt.Errorf("failed to chmod staged %s: %w", filepath.Base(path), err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("failed to close staged %s: %w", filepath.Base(path), err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("failed to finalize %s: %w", filepath.Base(path), err)
+	}
+	tmpName = "" // renamed; nothing to clean up
 	return nil
 }
 

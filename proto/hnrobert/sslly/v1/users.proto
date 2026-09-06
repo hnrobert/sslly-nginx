@@ -1,0 +1,120 @@
+// Control-API user and permission management backed by users.yaml.
+syntax = "proto3";
+
+package hnrobert.sslly.v1;
+
+import "google/api/annotations.proto";
+
+// ListUsersRequest is empty.
+message ListUsersRequest {}
+
+// ListUsersResponse carries all users.
+message ListUsersResponse {
+  // All users known to the control API.
+  repeated CMsgUser users = 1;
+}
+
+// UpsertUserRequest carries the user's new state and an optional new token.
+message UpsertUserRequest {
+  // User to create or replace, identified by name.
+  CMsgUser user = 1;
+  // New bearer token (plaintext, SHA-256-hashed at rest). Empty keeps the
+  // existing hash. Never echoed back.
+  string token = 2;
+}
+
+// UpsertUserResponse echoes the stored user (without any token material).
+message UpsertUserResponse {
+  // The user as it now exists in users.yaml.
+  CMsgUser user = 1;
+}
+
+// DeleteUserRequest names the user to remove.
+message DeleteUserRequest {
+  // User name.
+  string name = 1;
+}
+
+// DeleteUserResponse is empty.
+message DeleteUserResponse {}
+
+// CMsgUser is one users.yaml entry.
+message CMsgUser {
+  // User name.
+  string name = 1;
+  // Permission rules; a request is allowed when a single rule covers all its
+  // resources.
+  repeated CMsgPermission permissions = 2;
+}
+
+// CMsgPermission is one permission rule: a config surface, an access mode,
+// and optional scope selectors. An empty selector list means unrestricted on
+// that dimension.
+message CMsgPermission {
+  // Config surface this rule applies to.
+  EPermissionSurface surface = 1;
+  // Access mode granted.
+  EPermissionMode mode = 2;
+  // Domain selector: exact domain or "*.suffix" (subdomains only, not the
+  // bare apex). Empty = unrestricted.
+  repeated string domains = 3;
+  // Upstream selector: exact proxy.yaml upstream_key strings. Empty =
+  // unrestricted.
+  repeated string upstreams = 4;
+}
+
+// EPermissionSurface enumerates the configurable surfaces.
+enum EPermissionSurface {
+  // Unspecified; treated as no permission.
+  E_PERMISSION_SURFACE_UNSPECIFIED = 0;
+  // proxy.yaml entries and no_trailing_slash.
+  E_PERMISSION_SURFACE_PROXY = 1;
+  // cors.yaml rules.
+  E_PERMISSION_SURFACE_CORS = 2;
+  // logs.yaml settings.
+  E_PERMISSION_SURFACE_LOGS = 3;
+  // users.yaml management.
+  E_PERMISSION_SURFACE_USERS = 4;
+}
+
+// EPermissionMode enumerates access modes.
+enum EPermissionMode {
+  // Unspecified; treated as no permission.
+  E_PERMISSION_MODE_UNSPECIFIED = 0;
+  // Read-only access.
+  E_PERMISSION_MODE_READ = 1;
+  // Read and write access.
+  E_PERMISSION_MODE_READ_WRITE = 2;
+}
+
+// UsersService manages control-API users and their permission rules. Changes
+// take effect immediately (users.yaml is cached by mtime) and do not trigger
+// an nginx reload. A change that would leave zero users with users-scope
+// read-write access is rejected (last-admin guard).
+service UsersService {
+  // ListUsers returns every user with their permissions (token hashes are
+  // never returned).
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse) {
+    option (google.api.http) = {
+      post: "/ListUsers"
+      body: "*"
+    };
+  }
+
+  // UpsertUser creates or replaces a user. An empty token keeps the existing
+  // hash; a non-empty token replaces it.
+  rpc UpsertUser(UpsertUserRequest) returns (UpsertUserResponse) {
+    option (google.api.http) = {
+      post: "/UpsertUser"
+      body: "*"
+    };
+  }
+
+  // DeleteUser removes a user by name.
+  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse) {
+    option (google.api.http) = {
+      post: "/DeleteUser"
+      body: "*"
+    };
+  }
+}

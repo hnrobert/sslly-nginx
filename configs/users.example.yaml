@@ -1,0 +1,33 @@
+# sslly-nginx control API users.
+# token_hash is sha256(token) as hex. Generate a new one with:
+#   printf '%s' 'your-secret-token' | shasum -a 256    # macOS
+#   printf '%s' 'your-secret-token' | sha256sum        # Linux
+# Selector notes: domains entries are exact domains or "*.suffix" (subdomains
+# only, not the bare apex); upstreams entries match proxy.yaml upstream keys
+# verbatim. An absent selector means unrestricted on that dimension.
+users:
+  - name: admin
+    token_hash: 0000000000000000000000000000000000000000000000000000000000000000
+    permissions:
+      - surface: proxy
+        mode: read-write
+      - surface: cors
+        mode: read-write
+      - surface: logs
+        mode: read-write
+      - surface: users
+        mode: read-write
+
+  # Example limited operator: full CORS control under *.ibuduan.com, read-only
+  # proxy visibility, and management of port 8080 routes only.
+  # - name: ops
+  #   token_hash: <sha256 hex>
+  #   permissions:
+  #     - surface: cors
+  #       mode: read-write
+  #       domains: ["*.ibuduan.com"]
+  #     - surface: proxy
+  #       mode: read-write
+  #       upstreams: ["8080"]
+  #     - surface: proxy
+  #       mode: read

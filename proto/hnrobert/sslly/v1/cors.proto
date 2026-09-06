@@ -1,0 +1,103 @@
+// CORS rule management backed by cors.yaml.
+syntax = "proto3";
+
+package hnrobert.sslly.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/field_mask.proto";
+import "hnrobert/sslly/v1/apply.proto";
+
+// ListCorsRulesRequest is empty; every visible rule is returned.
+message ListCorsRulesRequest {}
+
+// ListCorsRulesResponse carries all visible rules.
+message ListCorsRulesResponse {
+  // Rules present in cors.yaml.
+  repeated CMsgCorsRule rules = 1;
+}
+
+// SetCorsRuleRequest carries a rule and the subset of fields to write.
+message SetCorsRuleRequest {
+  // Rule to create or update, identified by key.
+  CMsgCorsRule rule = 1;
+  // Fields to write (snake_case paths: allow_origin, allow_methods,
+  // allow_headers, expose_headers, max_age, allow_credentials). Empty = all.
+  google.protobuf.FieldMask update_mask = 2;
+}
+
+// SetCorsRuleResponse echoes the stored rule and the apply outcome.
+message SetCorsRuleResponse {
+  // The rule as it now exists in cors.yaml.
+  CMsgCorsRule rule = 1;
+  // Reload pipeline outcome for this change.
+  CMsgApplyResult apply = 2;
+}
+
+// DeleteCorsRuleRequest names the rule to remove.
+message DeleteCorsRuleRequest {
+  // Rule key: "*", "*.example.com", or an exact domain.
+  string key = 1;
+}
+
+// DeleteCorsRuleResponse reports the apply outcome.
+message DeleteCorsRuleResponse {
+  // Reload pipeline outcome for this change.
+  CMsgApplyResult apply = 1;
+}
+
+// CMsgCorsRule is one cors.yaml entry.
+message CMsgCorsRule {
+  // Rule key: "*" (catch-all), "*.suffix" (subdomains only, not the bare
+  // apex), or an exact domain.
+  string key = 1;
+  // Value for allow_origin ("", or the literal "*" for any origin).
+  string allow_origin = 2;
+  // Value for allow_methods.
+  repeated string allow_methods = 3;
+  // Value for allow_headers.
+  repeated string allow_headers = 4;
+  // Value for expose_headers.
+  repeated string expose_headers = 5;
+  // Preflight cache duration in seconds.
+  int32 max_age = 6;
+  // Whether credentials are allowed.
+  bool allow_credentials = 7;
+  // Fields explicitly present in cors.yaml (same paths as update_mask).
+  // Distinguishes "cleared" (present with an empty value) from "unset"
+  // (inherits from lower-priority layers). Only populated in responses.
+  google.protobuf.FieldMask explicit_fields = 8;
+}
+
+// CorsService manages cors.yaml rules keyed by domain ("*", "*.suffix", or an
+// exact domain). Field-level updates use google.protobuf.FieldMask in the same
+// spirit as cors.yaml presence semantics: a field listed in the mask is
+// explicitly set (a value of "" or [] clears it), a field absent from the mask
+// is left untouched (inheriting from lower-priority layers at generation
+// time). An empty mask means every field is explicitly set (full replace).
+service CorsService {
+  // ListCorsRules returns every rule; rules the caller cannot read are
+  // filtered out.
+  rpc ListCorsRules(ListCorsRulesRequest) returns (ListCorsRulesResponse) {
+    option (google.api.http) = {
+      post: "/ListCorsRules"
+      body: "*"
+    };
+  }
+
+  // SetCorsRule creates or updates one rule. Authorization covers the rule
+  // key as a domain resource.
+  rpc SetCorsRule(SetCorsRuleRequest) returns (SetCorsRuleResponse) {
+    option (google.api.http) = {
+      post: "/SetCorsRule"
+      body: "*"
+    };
+  }
+
+  // DeleteCorsRule removes one rule by its key.
+  rpc DeleteCorsRule(DeleteCorsRuleRequest) returns (DeleteCorsRuleResponse) {
+    option (google.api.http) = {
+      post: "/DeleteCorsRule"
+      body: "*"
+    };
+  }
+}

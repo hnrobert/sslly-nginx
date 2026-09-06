@@ -1,0 +1,124 @@
+// Proxy route management backed by proxy.yaml.
+syntax = "proto3";
+
+package hnrobert.sslly.v1;
+
+import "google/api/annotations.proto";
+import "hnrobert/sslly/v1/apply.proto";
+
+// ListProxyEntriesRequest is empty; every entry is returned (subject to
+// permission filtering).
+message ListProxyEntriesRequest {}
+
+// ListProxyEntriesResponse carries all visible entries in file order.
+message ListProxyEntriesResponse {
+  // Entries in proxy.yaml declaration order.
+  repeated CMsgProxyEntry entries = 1;
+}
+
+// SetProxyEntryRequest carries the full new state of one entry.
+message SetProxyEntryRequest {
+  // Entry to create or replace, identified by upstream_key.
+  CMsgProxyEntry entry = 1;
+}
+
+// SetProxyEntryResponse echoes the stored entry and the apply outcome.
+message SetProxyEntryResponse {
+  // The entry as it now exists in proxy.yaml.
+  CMsgProxyEntry entry = 1;
+  // Reload pipeline outcome for this change.
+  CMsgApplyResult apply = 2;
+}
+
+// DeleteProxyEntryRequest names the entry to remove.
+message DeleteProxyEntryRequest {
+  // Exact upstream key as written in proxy.yaml.
+  string upstream_key = 1;
+}
+
+// DeleteProxyEntryResponse reports the apply outcome.
+message DeleteProxyEntryResponse {
+  // Reload pipeline outcome for this change.
+  CMsgApplyResult apply = 1;
+}
+
+// GetNoTrailingSlashRequest is empty.
+message GetNoTrailingSlashRequest {}
+
+// GetNoTrailingSlashResponse lists keys exempt from trailing-slash redirects.
+message GetNoTrailingSlashResponse {
+  // Listener keys with redirects disabled, visible to the caller.
+  repeated string listener_keys = 1;
+}
+
+// SetNoTrailingSlashRequest replaces the whole exemption list.
+message SetNoTrailingSlashRequest {
+  // Complete new no_trailing_slash list.
+  repeated string listener_keys = 1;
+}
+
+// SetNoTrailingSlashResponse reports the apply outcome.
+message SetNoTrailingSlashResponse {
+  // Reload pipeline outcome for this change.
+  CMsgApplyResult apply = 1;
+}
+
+// CMsgProxyEntry is one proxy.yaml top-level mapping: an upstream key and the
+// listener keys routed to it.
+message CMsgProxyEntry {
+  // Upstream key exactly as written in proxy.yaml, e.g. "1234",
+  // "192.168.50.2:5678/api", "<tcp>9122", or "/app/static//home".
+  string upstream_key = 1;
+  // Listener keys routed to the upstream, e.g. "example.com",
+  // "example.com/api", "example.com|8443".
+  repeated string listener_keys = 2;
+}
+
+// ProxyService manages proxy.yaml: upstream entries (port -> listeners) and
+// the no_trailing_slash list. All mutating RPCs write the file (comments and
+// key order preserved), then run the validated reload pipeline synchronously
+// and report the outcome in CMsgApplyResult.
+service ProxyService {
+  // ListProxyEntries returns every upstream entry in proxy.yaml declaration
+  // order. Entries the caller is not allowed to read are filtered out.
+  rpc ListProxyEntries(ListProxyEntriesRequest) returns (ListProxyEntriesResponse) {
+    option (google.api.http) = {
+      post: "/ListProxyEntries"
+      body: "*"
+    };
+  }
+
+  // SetProxyEntry creates or replaces an upstream entry (full replace of its
+  // listener list). Authorization covers the complete new listener list.
+  rpc SetProxyEntry(SetProxyEntryRequest) returns (SetProxyEntryResponse) {
+    option (google.api.http) = {
+      post: "/SetProxyEntry"
+      body: "*"
+    };
+  }
+
+  // DeleteProxyEntry removes an upstream entry and all its listeners.
+  rpc DeleteProxyEntry(DeleteProxyEntryRequest) returns (DeleteProxyEntryResponse) {
+    option (google.api.http) = {
+      post: "/DeleteProxyEntry"
+      body: "*"
+    };
+  }
+
+  // GetNoTrailingSlash returns the listener keys that skip the
+  // /route -> /route/ 301 redirect.
+  rpc GetNoTrailingSlash(GetNoTrailingSlashRequest) returns (GetNoTrailingSlashResponse) {
+    option (google.api.http) = {
+      post: "/GetNoTrailingSlash"
+      body: "*"
+    };
+  }
+
+  // SetNoTrailingSlash fully replaces the no_trailing_slash list.
+  rpc SetNoTrailingSlash(SetNoTrailingSlashRequest) returns (SetNoTrailingSlashResponse) {
+    option (google.api.http) = {
+      post: "/SetNoTrailingSlash"
+      body: "*"
+    };
+  }
+}

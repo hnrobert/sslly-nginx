@@ -19,6 +19,8 @@ on:
       - "**/*.go"
       - "go.mod"
       - "go.sum"
+      - "proto/**"
+      - "Makefile"
 
 jobs:
   test:
@@ -32,7 +34,13 @@ jobs:
       - name: Setup Go with cache
         uses: ./.github/actions/setup-go
         with:
-          go-version: "1.21"
+          go-version: "1.25"
+
+      - name: Setup Buf
+        uses: bufbuild/buf-setup-action@v1
+
+      - name: Generate protobuf code
+        run: make generate
 
       - name: Verify dependencies
         run: go mod verify
@@ -50,3 +58,6 @@ jobs:
             gofmt -s -d .
             exit 1
           fi
+
+      - name: Lint protos
+        run: make proto-lint

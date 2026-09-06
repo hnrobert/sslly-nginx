@@ -1,0 +1,19 @@
+# Go codegen template — regenerated-outputs variant: gen/ is gitignored and
+# `make generate` (cd proto && buf generate) recreates it. Managed mode owns
+# go_package centrally; never set per-file java/go package options.
+version: v2
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/hnrobert/sslly-nginx/gen
+plugins:
+  - remote: buf.build/protocolbuffers/go
+    out: ../gen
+    opt: paths=source_relative
+  - remote: buf.build/grpc/go
+    out: ../gen
+    opt: paths=source_relative
+  - remote: buf.build/grpc-ecosystem/gateway
+    out: ../gen
+    opt: paths=source_relative

@@ -1,11 +1,14 @@
 package app
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/hnrobert/sslly-nginx/internal/api"
 	"github.com/hnrobert/sslly-nginx/internal/backup"
 	"github.com/hnrobert/sslly-nginx/internal/config"
 	"github.com/hnrobert/sslly-nginx/internal/logger"
@@ -34,6 +37,16 @@ type App struct {
 	staticSites         map[string]*runningStaticSite
 	reloadMu            sync.Mutex
 
+	// Control API (gRPC + gateway) and its dependencies.
+	apiServer *api.Server
+	users     *config.UserStore
+	editor    *config.Editor
+
+	// configHashMu guards lastAppliedConfigHash (sha256 of the YAML files
+	// behind the running nginx config; see reload.go).
+	configHashMu          sync.Mutex
+	lastAppliedConfigHash string
+
 	// suppress nginx.conf watchers for 2s after a programmatic write
 	suppressNginxMu         sync.Mutex
 	suppressNginxWatchUntil time.Time
@@ -41,6 +54,8 @@ type App struct {
 	reloadDebounceMu    sync.Mutex
 	reloadDebounceTimer *time.Timer
 	reloadDebounceSeq   uint64
+	reloadPendingConfig bool
+	reloadPendingSSL    bool
 }
 
 func New() (*App, error) {
@@ -48,6 +63,19 @@ func New() (*App, error) {
 		nginxManager: nginx.NewManager(),
 		staticSites:  make(map[string]*runningStaticSite),
 	}, nil
+}
+
+// certDomainSet snapshots the domains of the currently active certificates
+// (fed to the control API's pre-write validation). reloadMu mirrors the
+// writes in reload(), keeping the map read race-free.
+func (a *App) certDomainSet() map[string]bool {
+	a.reloadMu.Lock()
+	defer a.reloadMu.Unlock()
+	out := make(map[string]bool, len(a.activeCertMap))
+	for domain := range a.activeCertMap {
+		out[domain] = true
+	}
+	return out
 }
 
 func (a *App) Start() error {
@@ -128,6 +156,31 @@ func (a *App) Start() error {
 
 	// Save the good configuration
 	a.saveGoodConfiguration()
+	a.recordAppliedConfigHash()
+
+	// Control API: bootstrap users.yaml (first boot creates a full-access
+	// admin from SSLLY_API_ADMIN_TOKEN or a random one-time token), then
+	// start the gRPC + gateway dual stack.
+	if token, err := config.EnsureUsersFile(configDir, os.Getenv(api.EnvAdminToken)); err != nil {
+		return fmt.Errorf("failed to bootstrap control API users: %w", err)
+	} else if token != "" {
+		logger.Warn("Control API admin token (random, shown ONCE — save it now): %s", token)
+	}
+	a.users = config.LoadUserStore(configDir)
+	a.editor = config.NewEditor(configDir)
+	apiSrv := api.New(api.Config{
+		GRPCAddr:    os.Getenv(api.EnvGRPCAddr),
+		HTTPAddr:    os.Getenv(api.EnvHTTPAddr),
+		ConfigDir:   configDir,
+		Reload:      a.ApplyReload,
+		Users:       a.users,
+		Editor:      a.editor,
+		CertDomains: a.certDomainSet,
+	})
+	if err := apiSrv.Start(); err != nil {
+		return fmt.Errorf("failed to start control API: %w", err)
+	}
+	a.apiServer = apiSrv
 
 	// Setup watchers
 	if err := a.setupWatchers(); err != nil {
@@ -139,6 +192,13 @@ func (a *App) Start() error {
 }
 
 func (a *App) Stop() {
+	// Stop the control API first (reverse startup order): no new requests,
+	// drain in-flight RPCs, then tear down the rest.
+	if a.apiServer != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		a.apiServer.Stop(ctx)
+		cancel()
+	}
 	if a.configWatcher != nil {
 		a.configWatcher.Stop()
 	}

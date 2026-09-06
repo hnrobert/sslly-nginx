@@ -12,7 +12,7 @@ Both workflows coexist. When a managed reload runs after a manual edit, the manu
 ## File paths
 
 | Path | Role |
-|------|------|
+| ------ | ------ |
 | `/etc/nginx/nginx.conf` | The file nginx actually reads. |
 | `./configs/.sslly-runtime/current/nginx/nginx.conf` | Runtime cache copy — kept in sync with `/etc/nginx/nginx.conf`. |
 | `./configs/.sslly-runtime/current/certs/` | Stable cert paths referenced inside nginx.conf. Managed by sslly-nginx; do not edit manually. |
@@ -52,7 +52,8 @@ Writing to either file sets a `suppressUntil = now + 2s` timestamp. Both watcher
 When a managed reload runs and the current `/etc/nginx/nginx.conf` differs from the last generated config, sslly-nginx backs up the manually edited file before overwriting it.
 
 Backup location:
-```
+
+```text
 ./configs/.sslly-backups/manual-nginx-<timestamp>.conf
 ```
 
@@ -63,7 +64,7 @@ Backup location:
 ### Files changed
 
 | File | Change |
-|------|--------|
+| ------ | -------- |
 | `internal/app/app.go` | Add `runtimeNginxWatcher *fsnotify.Watcher`, `suppressNginxWatchUntil time.Time`, `suppressNginxMu sync.Mutex`; stop watcher in `Stop()` |
 | `internal/app/watchers.go` | Add watcher for `/etc/nginx/nginx.conf`; add `reRegisterRuntimeNginxWatcher()`; add `handleNginxConfEdit(src, dst)` for bidirectional sync |
 | `internal/app/reload.go` | Set suppress timestamp before writing either file; call `reRegisterRuntimeNginxWatcher()` after `activateRuntimeSnapshot()`; back up manual edits before overwrite |

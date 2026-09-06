@@ -27,7 +27,7 @@ static_directory//url_route
 ### upstream_key Components
 
 | Component | Required | Default | Description |
-|-----------|----------|---------|-------------|
+| ----------- | ---------- | --------- | ------------- |
 | `upstream_protocol` | No | `http` | Protocol prefix: `https`, `tcp`, `udp`. Omit for `http` |
 | `domain` | No | `127.0.0.1` | IP address or hostname. IPv6 must use brackets `[::1]` |
 | `port` | No | Protocol default | Port number |
@@ -54,7 +54,7 @@ static_directory//url_route
 ### Upstream Format Examples
 
 | Type | Format | Parsed As |
-|------|--------|-----------|
+| ------ | -------- | ----------- |
 | Port only | `8080` | `http://127.0.0.1:8080` |
 | IP:port | `192.168.1.1:3000` | `http://192.168.1.1:3000` |
 | Domain only | `api.example.com` | `http://api.example.com:80` |
@@ -77,7 +77,7 @@ static_directory//url_route
 ### listener_key Components
 
 | Component | Required | Default | Description |
-|-----------|----------|---------|-------------|
+| ----------- | ---------- | --------- | ------------- |
 | `listen_protocol` | No | Smart mode | Listen protocol: `http`, `https`, `tcp`, `udp` |
 | `listened_server_name` | No | All interfaces | Server name (domain) to listen on |
 | `listened_port` | No | Env var ports | Listen port |
@@ -88,9 +88,9 @@ When `listen_protocol` is not specified:
 
 - **TCP/UDP upstream** → automatically use same protocol for listen
 - **HTTP/HTTPS upstream** → adaptive based on certificate:
-  - Domain has SSL certificate → HTTPS
-  - Upstream is `<https>` → HTTPS
-  - Otherwise → HTTP
+   - Domain has SSL certificate → HTTPS
+   - Upstream is `<https>` → HTTPS
+   - Otherwise → HTTP
 
 ### listener_key Separator Rules
 
@@ -100,7 +100,7 @@ When `listen_protocol` is not specified:
 ### Listener Format Examples
 
 | Format | Example | Description |
-|--------|---------|-------------|
+| -------- | --------- | ------------- |
 | Domain only | `example.com` | Listen on domain, default port |
 | Port only | `8080` | Listen on port, all domains |
 | Domain\|port | `example.com\|8080` | Specific domain and port |
@@ -276,7 +276,7 @@ no_trailing_slash:
 ### Protocol Compatibility
 
 | Upstream | Listener | Behavior |
-|---------|----------|----------|
+| --------- | ---------- | ---------- |
 | HTTP/HTTPS | HTTP/HTTPS | Allowed |
 | HTTP/HTTPS | TCP/UDP | Error - config ignored |
 | HTTP/HTTPS | Static | Error - config ignored |
@@ -288,7 +288,7 @@ no_trailing_slash:
 ### Error Handling
 
 | Error Type | Behavior |
-|------------|----------|
+| ------------ | ---------- |
 | YAML format error | Entire configuration fails |
 | Invalid upstream key | Individual entry ignored |
 | Invalid listener key | Individual entry ignored |
@@ -300,14 +300,50 @@ no_trailing_slash:
 ## Environment Variables
 
 | Variable | Default | Description |
-|----------|---------|-------------|
+| ---------- | --------- | ------------- |
 | `SSLLY_DEFAULT_HTTP_LISTEN_PORT` | 80 | Default HTTP listen port |
 | `SSLLY_DEFAULT_HTTPS_LISTEN_PORT` | 443 | Default HTTPS listen port |
+| `SSLLY_API_HTTP_ADDR` | `:9080` | Control API HTTP/JSON gateway listen address |
+| `SSLLY_API_GRPC_ADDR` | `:9081` | Control API native gRPC listen address |
+| `SSLLY_API_ADMIN_TOKEN` | — | Bootstrap admin token, hashed into `users.yaml` on first boot |
 
 **Legacy Variables (deprecated):**
 
 - `SSL_NGINX_HTTP_PORT`
 - `SSL_NGINX_HTTPS_PORT`
+
+## Control API Users (users.yaml)
+
+`configs/users.yaml` holds the control API's users: SHA-256 token hashes plus
+permission rules (see [API.md](API.md) for the request-level semantics). It is
+created automatically on first boot with a full-access `admin` user; the token
+comes from `SSLLY_API_ADMIN_TOKEN` or a one-time random value printed to the
+log. Editing the file takes effect on the next API request without an nginx
+reload; the API can also manage users itself (`UsersService`).
+
+```yaml
+users:
+  - name: admin
+    token_hash: 3f79bb7b...  # sha256(token) hex
+    permissions:
+      - surface: proxy       # proxy | cors | logs | users
+        mode: read-write     # read | read-write
+      - surface: cors
+        mode: read-write
+      - surface: logs
+        mode: read-write
+      - surface: users
+        mode: read-write
+  - name: ops
+    token_hash: 9c1185a6...
+    permissions:
+      - surface: cors
+        mode: read-write
+        domains: ["*.ibuduan.com"]            # exact or *.suffix; absent = all
+      - surface: proxy
+        mode: read-write
+        upstreams: ["8080", "192.168.50.2:1234"]  # verbatim upstream keys; absent = all
+```
 
 ## Complete Examples
 

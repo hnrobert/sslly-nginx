@@ -1,0 +1,67 @@
+// Runtime log configuration backed by logs.yaml.
+syntax = "proto3";
+
+package hnrobert.sslly.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/field_mask.proto";
+import "hnrobert/sslly/v1/apply.proto";
+
+// GetLogsConfigRequest is empty.
+message GetLogsConfigRequest {}
+
+// GetLogsConfigResponse carries the current settings.
+message GetLogsConfigResponse {
+  // Values as stored in logs.yaml.
+  CMsgLogsConfig config = 1;
+}
+
+// UpdateLogsConfigRequest carries new values and the subset to write.
+message UpdateLogsConfigRequest {
+  // New values for the masked fields.
+  CMsgLogsConfig config = 1;
+  // Fields to write (paths: sslly.level, nginx.level, nginx.stderr_as,
+  // nginx.stderr_show). Empty = all.
+  google.protobuf.FieldMask update_mask = 2;
+}
+
+// UpdateLogsConfigResponse echoes the stored values and apply outcome.
+message UpdateLogsConfigResponse {
+  // Values as now stored in logs.yaml.
+  CMsgLogsConfig config = 1;
+  // Reload pipeline outcome for this change.
+  CMsgApplyResult apply = 2;
+}
+
+// CMsgLogsConfig mirrors one logs.yaml document.
+message CMsgLogsConfig {
+  // sslly.level: debug | info | warn | error.
+  string sslly_level = 1;
+  // nginx.level: debug | info | warn | error.
+  string nginx_level = 2;
+  // nginx.stderr_as: info | warn | error.
+  string nginx_stderr_as = 3;
+  // nginx.stderr_show: warn or error (defaults to stderr_as).
+  string nginx_stderr_show = 4;
+}
+
+// LogsService manages logs.yaml. Field-level updates use
+// google.protobuf.FieldMask; an empty mask writes every field.
+service LogsService {
+  // GetLogsConfig returns the current logs.yaml values.
+  rpc GetLogsConfig(GetLogsConfigRequest) returns (GetLogsConfigResponse) {
+    option (google.api.http) = {
+      post: "/GetLogsConfig"
+      body: "*"
+    };
+  }
+
+  // UpdateLogsConfig writes a subset (or all) of the log settings and applies
+  // them through the reload pipeline.
+  rpc UpdateLogsConfig(UpdateLogsConfigRequest) returns (UpdateLogsConfigResponse) {
+    option (google.api.http) = {
+      post: "/UpdateLogsConfig"
+      body: "*"
+    };
+  }
+}

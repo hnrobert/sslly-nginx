@@ -1,0 +1,13 @@
+# Buf module config (v2). Run `buf lint` and
+# `buf breaking --against '.git#branch=main'` in CI (fetch-depth: 0).
+version: v2
+modules:
+  - path: .
+lint:
+  use:
+    - STANDARD
+breaking:
+  use:
+    - FILE
+deps:
+  - buf.build/googleapis/googleapis

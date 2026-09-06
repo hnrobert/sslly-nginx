@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.21-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /build
 
@@ -9,6 +9,11 @@ RUN go mod download
 
 # Copy source code
 COPY . .
+
+# Regenerate protobuf/gRPC/gateway code (gen/ is gitignored; buf pulls the
+# pinned remote plugins from the Buf Schema Registry).
+COPY --from=bufbuild/buf:1.72.0 /usr/local/bin/buf /usr/local/bin/buf
+RUN cd proto && buf lint && buf generate --template buf.gen.go.yaml --include-imports
 
 # Build the application
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o sslly-nginx ./cmd/sslly-nginx
@@ -27,6 +32,7 @@ RUN mkdir -p /app/configs /app/ssl /etc/nginx/ssl /etc/sslly/configs /var/run \
 COPY configs/proxy.example.yaml /etc/sslly/configs/proxy.example.yaml
 COPY configs/cors.example.yaml /etc/sslly/configs/cors.example.yaml
 COPY configs/logs.example.yaml /etc/sslly/configs/logs.example.yaml
+COPY configs/users.example.yaml /etc/sslly/configs/users.example.yaml
 
 # Generate a dummy self-signed certificate for default HTTPS server
 RUN openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \

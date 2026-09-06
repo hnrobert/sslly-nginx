@@ -4,6 +4,8 @@ A smart Nginx SSL reverse proxy manager that automatically configures SSL certif
 
 > I HATE writing Nginx config, that's why this project was born.  
 > Just tell this tool the port and domain, and let it handle the rest.  
+
+<!-- markdownlint-disable-next-line MD033 -->
 > <p align="right"><strong>Robert He</strong></p>
 
 ![logo](assets/images/logo.png)
@@ -98,7 +100,7 @@ static_route//additional/routes
 ```
 
 | Component | Required | Default | Description |
-|-----------|----------|---------|-------------|
+| ----------- | ---------- | --------- | ------------- |
 | `upstream_protocol` | No | `http` | `https`, `tcp`, `udp` (omit for `http`) |
 | `domain` | No | `127.0.0.1` | IP or hostname (IPv6: `[::1]`) |
 | `port` | No | Protocol default | Port number |
@@ -112,7 +114,7 @@ static_route//additional/routes
 ```
 
 | Component | Required | Default | Description |
-|-----------|----------|---------|-------------|
+| ----------- | ---------- | --------- | ------------- |
 | `listen_protocol` | No | Smart mode | `http`, `https`, `tcp`, `udp` |
 | `listened_server_name` | No | All interfaces | Server name (domain) |
 | `listened_port` | No | Env var ports | Listen port |
@@ -162,6 +164,14 @@ api.example.com:
 ```
 
 For more please check [CORS Configuration](docs/CORS.md) for comprehensive CORS setup guide and best practices examples.
+
+#### Control API Users
+
+The web control API (below) authenticates bearers against `configs/users.yaml`
+(SHA-256 token hashes; multi-user, per-surface/per-scope read-write
+permissions). The file is bootstrapped automatically on first boot — set
+`SSLLY_API_ADMIN_TOKEN` or watch the log for the one-time random admin token.
+See [Control API Reference](docs/API.md) for the full schema and semantics.
 
 ### SSL Certificate Structure
 
@@ -253,18 +263,33 @@ On startup and after every successful reload, the service prints a single domain
 ### Error Handling
 
 - **Initial Startup**:
-  - If configuration is invalid, the service stops
-  - Missing SSL certificates are **not** an error - service runs in HTTP-only mode
+   - If configuration is invalid, the service stops
+   - Missing SSL certificates are **not** an error - service runs in HTTP-only mode
 - **Runtime Errors**: If reload fails, the application:
-  - Logs detailed error messages
-  - Restores the last working configuration
-  - Continues running with previous settings
+   - Logs detailed error messages
+   - Restores the last working configuration
+   - Continues running with previous settings
+
+### Web Control API
+
+A gRPC + HTTP/JSON control API for reading and mutating the YAML
+configuration over POST requests (proxy routes, CORS rules, log settings, and
+API users themselves), with multi-user bearer-token auth and per-scope
+read/write permissions. Mutations preserve comments and key order in the YAML
+files and run through the same validated reload pipeline as file edits,
+rolling back automatically when nginx rejects the result.
+
+Environment variables: `SSLLY_API_HTTP_ADDR` (default `:9080`, JSON),
+`SSLLY_API_GRPC_ADDR` (default `:9081`, native gRPC), and
+`SSLLY_API_ADMIN_TOKEN` (bootstrap admin token on first boot). Full reference:
+[docs/API.md](docs/API.md).
 
 ## Testing
 
 Run unit tests:
 
 ```bash
+make generate   # regenerates gen/ from proto/ (requires buf: brew install buf)
 go test ./...
 ```
 
@@ -287,11 +312,11 @@ The reverse proxy includes optimized settings for various applications:
 - **Large File Upload**: Supports files up to 100MB by default
 - **Correct Host Header**: Uses `$host` to preserve the original request hostname (critical for apps like qBittorrent, OnlineJudge)
 - **Proxy Headers**: Includes all standard headers:
-  - `Host`: Original request hostname (e.g., `torrent.hnrobert.space`)
-  - `X-Real-IP`: Client's real IP address
-  - `X-Forwarded-For`: Full proxy chain
-  - `X-Forwarded-Host`: Original Host header
-  - `X-Forwarded-Proto`: Original protocol (http/https)
+   - `Host`: Original request hostname (e.g., `torrent.hnrobert.space`)
+   - `X-Real-IP`: Client's real IP address
+   - `X-Forwarded-For`: Full proxy chain
+   - `X-Forwarded-Host`: Original Host header
+   - `X-Forwarded-Proto`: Original protocol (http/https)
 - **Cookie Security**: Automatically sets Secure flag for cookies when using HTTPS
 - **Timeouts**: Configured with 60s timeouts for connect/send/read operations
 - **Proxy Buffering**: Optimized buffer settings for better performance
@@ -403,32 +428,32 @@ The project includes three GitHub Actions workflows:
 
 - **Triggers**: All branch pushes and pull requests
 - **Actions**:
-  - Build the application
-  - Run tests
-  - Run linter and format checks
+   - Build the application
+   - Run tests
+   - Run linter and format checks
 - **No Docker image is built**
 
 ### 2. Docker Build Workflow (`docker-build.yml`)
 
 - **Triggers**: Pushes to `main` and `develop` branches
 - **Actions**:
-  - Run tests
-  - Build Docker image
-  - Push to `ghcr.io`
+   - Run tests
+   - Build Docker image
+   - Push to `ghcr.io`
 - **Tags**:
-  - `main` branch → `latest` tag
-  - `develop` branch → `develop` tag
+   - `main` branch → `latest` tag
+   - `develop` branch → `develop` tag
 
 ### 3. Release Workflow (`release.yml`)
 
 - **Triggers**:
-  - Git tag push (e.g., `v1.0.0`)
-  - Manual workflow dispatch
+   - Git tag push (e.g., `v1.0.0`)
+   - Manual workflow dispatch
 - **Actions**:
-  - Create tag (if workflow_dispatch)
-  - Run tests
-  - Build and push Docker image with version tag
-  - Create GitHub release
+   - Create tag (if workflow_dispatch)
+   - Run tests
+   - Build and push Docker image with version tag
+   - Create GitHub release
 
 ## Docker Compose Configuration
 
@@ -437,8 +462,8 @@ The `docker-compose.yml` is configured with:
 - **Network Mode**: `host` - Uses host networking for direct port access
 - **Restart Policy**: `on-failure` - Stops on errors, auto-starts on system boot
 - **Volumes**:
-  - `./configs:/app/configs:ro` - Configuration (read-only)
-  - `./ssl:/app/ssl:ro` - SSL certificates (read-only)
+   - `./configs:/app/configs:ro` - Configuration (read-only)
+   - `./ssl:/app/ssl:ro` - SSL certificates (read-only)
 
 ### Environment Variables
 
