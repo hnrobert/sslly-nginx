@@ -7,13 +7,11 @@ WORKDIR /build
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy source code
+# Copy source code (must include gen/ — the gitignored generated protobuf
+# code. Every build path guarantees it: `make docker-build` and the CI
+# workflows run `make generate-go` first, and .dockerignore keeps gen/ in
+# the context.)
 COPY . .
-
-# Regenerate protobuf/gRPC/gateway code (gen/ is gitignored; buf pulls the
-# pinned remote plugins from the Buf Schema Registry).
-COPY --from=bufbuild/buf:1.72.0 /usr/local/bin/buf /usr/local/bin/buf
-RUN cd proto && buf lint && buf generate --template buf.gen.go.yaml --include-imports
 
 # Build the application
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o sslly-nginx ./cmd/sslly-nginx

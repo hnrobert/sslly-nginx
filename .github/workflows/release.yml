@@ -91,6 +91,21 @@ jobs:
             echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           fi
 
+      # Publish the proto module to the BSR under a label matching the tag,
+      # so SDK consumers can pin @<tag> (see docs/SDK.md). The default label
+      # `main` is moved along too (--label is repeatable), keeping @main and
+      # @latest pointing at the newest release. Idempotent: a re-run
+      # re-pushes identical content (BSR squashes to the same commit).
+      # Non-blocking: a BSR outage must not stop the Docker/GitHub release.
+      - name: Push proto module to BSR (tag label)
+        continue-on-error: true
+        run: >
+          cd proto && buf push
+          --label "${{ steps.tag.outputs.tag }}"
+          --label main
+          --source-control-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
+          --error-format github-actions
+
       - name: Log in to Container Registry
         uses: docker/login-action@v4
         with:

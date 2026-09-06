@@ -157,12 +157,15 @@ buf generate buf.build/sslly-nginx/sslly-nginx --template buf.gen.<lang>.yaml --
 
 ## Versioning
 
-- Every push of `proto/**` to `main` publishes a new module commit on the
-  default label — consumers on `@latest`/`@main` track it.
-- Every `v*` git tag publishes the same content under a **label** matching
-  the tag: pin with `go get ...@v1.2.3` /
+- Publishing is **release-driven**: every `v*` git tag pushes the module to
+  the BSR under a label matching the tag and moves the default label `main`
+  along, so `@main`/`@latest` always track the newest release.
+- Pin a release with `go get ...@v1.2.3` /
   `npm install @buf/sslly-nginx_sslly-nginx.buf.build_es@v1.2.3`. The label
   resolves to the concrete SDK version (`PLUGIN_VERSION-YYYYMMDDHHMMSS-COMMIT12.REVISION`).
+- Between releases, unreleased contract changes are not published — to let
+  another project try a work-in-progress contract, push it manually from a
+  checkout with `make proto-push` (it moves the default label).
 - Pre-release labels (cut from `develop`, e.g. `v1.2.4-rc1`) sort below all
   released versions automatically.
 - Labels are mutable pointers, commits are immutable. **Never move a
