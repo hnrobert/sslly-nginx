@@ -314,28 +314,32 @@ no_trailing_slash:
 
 ## Control API Users (users.yaml)
 
-`configs/users.yaml` holds the control API's users: SHA-256 token hashes plus
+`configs/users.yaml` holds the control API's users: credentials plus
 permission rules (see [API.md](API.md) for the request-level semantics). It is
 created automatically on first boot with a full-access `admin` user; the token
 comes from `SSLLY_API_ADMIN_TOKEN` or a one-time random value printed to the
 log. Editing the file takes effect on the next API request without an nginx
 reload; the API can also manage users itself (`UsersService`).
 
+Two credential forms are accepted:
+
+- `token_hash: <sha256 hex>` — the steady-state form (generate with
+  `printf '%s' 'token' | shasum -a 256`);
+- `token: <plaintext>` — a convenience form. **On the next cold start**
+  the app converts it to `token_hash`, strips the plaintext, and leaves a
+  `# converted from token at startup` comment. **Hot reloads never touch
+  the file**: while a `token` field exists it is the authoritative
+  credential (any `token_hash` next to it is ignored).
+
 ```yaml
 users:
   - name: admin
-    token_hash: 3f79bb7b...  # sha256(token) hex
+    token: change-me-now    # converted to token_hash on next restart
     permissions:
       - surface: proxy       # proxy | cors | logs | users
         mode: read-write     # read | read-write
-      - surface: cors
-        mode: read-write
-      - surface: logs
-        mode: read-write
-      - surface: users
-        mode: read-write
   - name: ops
-    token_hash: 9c1185a6...
+    token_hash: 3f79bb7b...  # sha256(token) hex
     permissions:
       - surface: cors
         mode: read-write

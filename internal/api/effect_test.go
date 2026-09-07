@@ -2,8 +2,10 @@ package api
 
 import (
 	"net/http"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hnrobert/sslly-nginx/internal/config"
 	"github.com/hnrobert/sslly-nginx/internal/nginx"
@@ -245,5 +247,55 @@ func TestUpstreamScopedWriteBoundary(t *testing.T) {
 	conf := e.generatedNginxConf(t)
 	if !strings.Contains(conf, "server_name yourdomain.com") {
 		t.Fatalf("fixture entry must be untouched:\n%.500s", conf)
+	}
+}
+
+// TestTokenFieldHotReloadAuth: a user added to users.yaml with a
+// plaintext token while the service is RUNNING (hot reload — no
+// cold-start migration) authenticates with that token through the
+// gateway, while existing hash users keep working.
+func TestTokenFieldHotReloadAuth(t *testing.T) {
+	e := newTestEnv(t)
+
+	// Simulate the operator hand-editing users.yaml at runtime: append a
+	// token-style user next to the existing hash-style admin/ops.
+	path := config.UsersFilePath(e.dir)
+	if err := os.WriteFile(path, []byte(
+		"users:\n"+
+			"  - name: admin\n"+
+			"    token_hash: "+config.HashToken(e.adminToken)+"\n"+
+			"    permissions:\n      - surface: users\n        mode: read-write\n"+
+			"  - name: pwuser\n"+
+			"    token: live-plaintext\n"+
+			"    permissions:\n      - surface: logs\n        mode: read-write\n"), 0666); err != nil {
+		t.Fatal(err)
+	}
+	// Push mtime past the store's cache granularity.
+	future := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(path, future, future); err != nil {
+		t.Fatal(err)
+	}
+
+	// Hash-style user still authenticates.
+	code, _ := e.post(t, "/v1/ListUsers", e.adminToken, "{}")
+	if code != http.StatusOK {
+		t.Fatalf("hash-style admin = %d", code)
+	}
+
+	// token-style user authenticates with the plaintext as bearer.
+	code, _ = e.post(t, "/v1/GetLogsConfig", "live-plaintext", "{}")
+	if code != http.StatusOK {
+		t.Fatalf("token-style user = %d", code)
+	}
+
+	// The file was NOT migrated by the hot reload (no conversion happened):
+	// the plaintext must still be on disk.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "token: live-plaintext") ||
+		strings.Contains(string(data), "converted from token") {
+		t.Fatalf("hot reload must leave token fields untouched:\n%s", data)
 	}
 }

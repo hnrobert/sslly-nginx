@@ -45,6 +45,14 @@ printf '%s' 'your-secret-token' | shasum -a 256    # macOS
 printf '%s' 'your-secret-token' | sha256sum        # Linux
 ```
 
+As a convenience, a user entry may carry `token: <plaintext>` instead —
+usable immediately on a running service (hot reloads verify against it
+directly and never rewrite the file). On the **next cold start** the app
+converts it to `token_hash`, strips the plaintext, and marks the line with a
+`# converted from token at startup` comment. While a `token` field
+exists it is the authoritative credential — a stale `token_hash` beside it
+is ignored.
+
 A missing or malformed `users.yaml` fails **closed**: every authenticated
 call is rejected until the file is fixed. Permission changes apply on the
 next request (the file is cached by mtime) and never trigger an nginx

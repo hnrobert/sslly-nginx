@@ -170,3 +170,106 @@ func TestHashToken(t *testing.T) {
 		t.Fatal("hashes must differ")
 	}
 }
+
+func TestVerifyTokenPlaintextFieldPreferred(t *testing.T) {
+	dir := t.TempDir()
+	content := "users:\n" +
+		"  - name: pw\n" +
+		"    token: plaintext-secret\n" +
+		"    token_hash: " + HashToken("stale-hash-credential") + "\n" + // stale: must be ignored
+		"    permissions:\n      - surface: logs\n        mode: read\n" +
+		"  - name: hashonly\n" +
+		"    token_hash: " + HashToken("hash-credential") + "\n" +
+		"    permissions:\n      - surface: logs\n        mode: read\n" +
+		"  - name: nocreds\n" +
+		"    permissions:\n      - surface: logs\n        mode: read\n"
+	if err := os.WriteFile(UsersFilePath(dir), []byte(content), 0666); err != nil {
+		t.Fatal(err)
+	}
+
+	store := LoadUserStore(dir)
+
+	// token field is authoritative: its plaintext authenticates.
+	if u, err := store.VerifyToken("plaintext-secret"); err != nil || u.Name != "pw" {
+		t.Fatalf("token-field login failed: %v %v", u, err)
+	}
+	// the stale hash next to it must NOT authenticate.
+	if _, err := store.VerifyToken("stale-hash-credential"); err == nil {
+		t.Fatal("stale token_hash must be ignored while token field exists")
+	}
+	// users without a token field still go through token_hash.
+	if u, err := store.VerifyToken("hash-credential"); err != nil || u.Name != "hashonly" {
+		t.Fatalf("hash login failed: %v %v", u, err)
+	}
+	// a user with neither credential fails closed.
+	if _, err := store.VerifyToken("anything"); err == nil {
+		t.Fatal("credential-less user must never authenticate")
+	}
+}
+
+func TestMigrateTokensToHashes(t *testing.T) {
+	dir := t.TempDir()
+	path := UsersFilePath(dir)
+	content := "# users\n" +
+		"users:\n" +
+		"  - name: alice  # keep me\n" +
+		"    token: alice-pw\n" +
+		"    permissions:\n      - surface: logs\n        mode: read\n" +
+		"  - name: bob\n" +
+		"    token_hash: " + HashToken("bob-token") + "\n" +
+		"    permissions:\n      - surface: logs\n        mode: read\n" +
+		"  - name: carol\n" +
+		"    token: carol-pw\n" +
+		"    token_hash: " + HashToken("old") + "\n" + // stale: the token field overwrites it
+		"    permissions:\n      - surface: logs\n        mode: read\n"
+	if err := os.WriteFile(path, []byte(content), 0666); err != nil {
+		t.Fatal(err)
+	}
+
+	ed := NewEditor(dir)
+	n, err := ed.MigrateTokensToHashes()
+	if err != nil || n != 2 {
+		t.Fatalf("MigrateTokensToHashes = %d, %v; want 2, nil", n, err)
+	}
+
+	out, _ := os.ReadFile(path)
+	s := string(out)
+	if strings.Contains(s, "alice-pw") || strings.Contains(s, "carol-pw") || strings.Contains(s, "token:") {
+		t.Fatalf("plaintext tokens must be stripped:\n%s", s)
+	}
+	if !strings.Contains(s, "# keep me") {
+		t.Fatalf("existing comments must survive:\n%s", s)
+	}
+	if !strings.Contains(s, "converted from token at startup") {
+		t.Fatalf("conversion note missing:\n%s", s)
+	}
+
+	// Semantics: converted users authenticate with the old plaintext.
+	users, err := LoadUserStore(dir).Users()
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]User{}
+	for _, u := range users {
+		byName[u.Name] = u
+	}
+	if byName["alice"].TokenHash != HashToken("alice-pw") {
+		t.Fatalf("alice hash wrong: %s", byName["alice"].TokenHash)
+	}
+	if byName["carol"].TokenHash != HashToken("carol-pw") {
+		t.Fatalf("carol's stale hash must be overwritten by her token: %s", byName["carol"].TokenHash)
+	}
+	if byName["bob"].TokenHash != HashToken("bob-token") {
+		t.Fatalf("untouched user's hash changed: %s", byName["bob"].TokenHash)
+	}
+
+	// Idempotent: a second pass finds nothing and writes nothing.
+	before, _ := os.ReadFile(path)
+	if n, err := ed.MigrateTokensToHashes(); err != nil || n != 0 {
+		t.Fatalf("second pass = %d, %v; want 0, nil", n, err)
+	}
+	after, _ := os.ReadFile(path)
+	if string(before) != string(after) {
+		t.Fatalf("second pass must not rewrite the file")
+	}
+}

@@ -32,9 +32,18 @@ const (
 )
 
 // User is one control-API identity from users.yaml.
+//
+// Authentication accepts either form; when both are present, Token wins:
+//
+//   - token_hash: sha256(token) as hex — the preferred, steady-state form;
+//   - token:      plaintext token written by the operator. On a cold start
+//     the app converts it to token_hash and strips the field (see
+//     Editor.MigrateTokensToHashes); on hot reloads the file is left
+//     untouched and the plaintext is used directly for verification.
 type User struct {
 	Name        string       `yaml:"name"`
-	TokenHash   string       `yaml:"token_hash"` // sha256(token) as hex; never the plaintext
+	Token       string       `yaml:"token,omitempty"` // plaintext token; startup converts it to token_hash
+	TokenHash   string       `yaml:"token_hash,omitempty"`
 	Permissions []Permission `yaml:"permissions"`
 }
 
@@ -138,8 +147,11 @@ func validateUsers(users []User) error {
 // ErrUnknownToken is returned by VerifyToken when no user matches.
 var ErrUnknownToken = errors.New("unknown token")
 
-// VerifyToken resolves a bearer token to its user. Token comparison is
-// constant-time; users whose stored hash is malformed are skipped (fail
+// VerifyToken resolves a bearer token to its user. A user carrying a
+// plaintext token field is verified against it EXCLUSIVELY (it is the
+// authoritative credential — a stale token_hash next to it never grants
+// access); only users without a token field fall back to token_hash. All
+// comparisons are constant-time; malformed credentials skip that user (fail
 // closed for that user only).
 func (s *UserStore) VerifyToken(token string) (*User, error) {
 	users, err := s.Users()
@@ -149,6 +161,13 @@ func (s *UserStore) VerifyToken(token string) (*User, error) {
 	sum := sha256.Sum256([]byte(token))
 	for i := range users {
 		u := &users[i]
+		if u.Token != "" {
+			pw := sha256.Sum256([]byte(u.Token))
+			if subtle.ConstantTimeCompare(pw[:], sum[:]) == 1 {
+				return u, nil
+			}
+			continue // the token field is authoritative: no token_hash fallback
+		}
 		stored, err := hex.DecodeString(u.TokenHash)
 		if err != nil || len(stored) != sha256.Size {
 			continue

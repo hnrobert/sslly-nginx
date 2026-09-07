@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 
 	"gopkg.in/yaml.v3"
@@ -382,6 +383,9 @@ func (e *Editor) upsertUserLocked(u User, newTokenHash string) (prev []byte, err
 			if _, _, h := findEntry(item, "token_hash"); h != nil {
 				u.TokenHash = h.Value
 			}
+			if _, _, p := findEntry(item, "token"); p != nil {
+				u.Token = p.Value // keep token-style users working through API upserts
+			}
 		}
 	} else {
 		u.TokenHash = newTokenHash
@@ -398,6 +402,61 @@ func (e *Editor) upsertUserLocked(u User, newTokenHash string) (prev []byte, err
 		return nil, err
 	}
 	return prev, nil
+}
+
+// MigrateTokensToHashes converts every plaintext `token` field in
+// users.yaml into `token_hash` (the token field wins over any pre-existing hash),
+// strips the plaintext, and leaves a comment marking the conversion. This is
+// a COLD-START-ONLY operation: the app calls it from Start(); hot reloads
+// never touch the file and verify against the token field directly
+// instead. Returns how many users were converted (0 = nothing written).
+func (e *Editor) MigrateTokensToHashes() (int, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	doc, err := loadUsersDoc(e.path(usersConfigFile))
+	if err != nil {
+		return 0, err
+	}
+	root := documentRoot(doc.node)
+	_, _, usersVal := findEntry(root, "users")
+	if usersVal == nil || usersVal.Kind != yaml.SequenceNode {
+		return 0, nil
+	}
+
+	const note = "converted from token at startup"
+	converted := 0
+	for _, item := range usersVal.Content {
+		if item.Kind != yaml.MappingNode {
+			continue
+		}
+		i, _, pwd := findEntry(item, "token")
+		if i < 0 || pwd == nil || strings.TrimSpace(pwd.Value) == "" {
+			continue
+		}
+		hash := HashToken(pwd.Value)
+
+		// Strip the plaintext pair.
+		item.Content = append(item.Content[:i], item.Content[i+2:]...)
+
+		// Set the hash (replacing a stale one), annotated with the conversion.
+		if j, key, _ := findEntry(item, "token_hash"); j >= 0 {
+			item.Content[j+1].Value = hash
+			key.LineComment = joinComments(key.LineComment, note)
+		} else {
+			key := strScalar("token_hash")
+			key.LineComment = note
+			item.Content = append(item.Content, key, strScalar(hash))
+		}
+		converted++
+	}
+
+	if converted > 0 {
+		if err := WriteYAMLNodeFileAtomic(e.path(usersConfigFile), doc.node); err != nil {
+			return 0, err
+		}
+	}
+	return converted, nil
 }
 
 // DeleteUser removes a user by name. ErrEntryNotFound when absent.
@@ -461,6 +520,10 @@ func userNode(u User) *yaml.Node {
 	m := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	setMapLeaf(m, "name", strScalar(u.Name))
 	setMapLeaf(m, "token_hash", strScalar(u.TokenHash))
+	if u.Token != "" {
+		// token-style user preserved verbatim (converted on next cold start).
+		setMapLeaf(m, "token", strScalar(u.Token))
+	}
 
 	perms := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
 	for _, p := range u.Permissions {

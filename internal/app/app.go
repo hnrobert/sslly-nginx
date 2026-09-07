@@ -166,8 +166,18 @@ func (a *App) Start() error {
 	} else if token != "" {
 		logger.Warn("Control API admin token (random, shown ONCE — save it now): %s", token)
 	}
-	a.users = config.LoadUserStore(configDir)
 	a.editor = config.NewEditor(configDir)
+
+	// Cold-start migration: convert any plaintext `token` fields in
+	// users.yaml to token_hash and strip them (hot reloads never do this —
+	// they verify against the token field directly instead).
+	if n, err := a.editor.MigrateTokensToHashes(); err != nil {
+		logger.Warn("users.yaml token migration failed; token fields stay in place and remain usable: %v", err)
+	} else if n > 0 {
+		logger.Info("Converted %d plaintext token(s) in users.yaml to token_hash", n)
+	}
+
+	a.users = config.LoadUserStore(configDir)
 	apiSrv := api.New(api.Config{
 		GRPCAddr:    os.Getenv(api.EnvGRPCAddr),
 		HTTPAddr:    os.Getenv(api.EnvHTTPAddr),
