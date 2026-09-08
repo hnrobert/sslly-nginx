@@ -2,6 +2,7 @@
   "cSpell.words": [
     "addgroup",
     "adduser",
+    "ALPN",
     "Behavior",
     "bufbuild",
     "bufconn",
@@ -58,8 +59,8 @@
     "sindex",
     "softprops",
     "SSLLY",
-    "Sslly",
     "sslly",
+    "Sslly",
     "ssllyv",
     "subj",
     "tmpl",
