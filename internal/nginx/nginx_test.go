@@ -588,3 +588,79 @@ func TestGenerateConfig_StaticSitesNoIndex(t *testing.T) {
 	// Should NOT have try_files (no SPA support without index.html)
 	// Just check that the config doesn't crash
 }
+
+func TestGenerateConfig_GRPCProxy(t *testing.T) {
+	cfg := &config.Config{
+		CORS: map[string]config.CORSConfig{},
+		Ports: map[string][]string{
+			"<grpc>9081": {"grpc.example.com"},
+			"8080":       {"web.example.com"},
+		},
+		OrderedPorts: []string{"<grpc>9081", "8080"},
+	}
+
+	ng := GenerateConfig(cfg, nil) // no certs: gRPC domain goes h2c
+
+	// gRPC domain: http2 on + grpc_pass, no proxy_pass for it.
+	if !strings.Contains(ng, "listen 80;\n        http2 on;\n        server_name grpc.example.com") {
+		t.Fatalf("h2c block missing http2 on:\n%s", ng)
+	}
+	if !strings.Contains(ng, "grpc_pass grpc://127.0.0.1:9081;") {
+		t.Fatalf("grpc_pass missing:\n%s", ng)
+	}
+	if strings.Contains(ng, "grpc_read_timeout 3600s;") == false {
+		t.Fatalf("grpc timeouts missing:\n%s", ng)
+	}
+
+	// Plain HTTP domain next to it must be untouched (no http2 injection).
+	if !strings.Contains(ng, "proxy_pass http://127.0.0.1:8080;") {
+		t.Fatalf("regular proxy route broken:\n%s", ng)
+	}
+	webBlock := ng[strings.Index(ng, "server_name web.example.com")-200:]
+	if strings.Contains(webBlock[:200], "http2 on") {
+		t.Fatalf("http2 must not leak into non-gRPC blocks:\n%s", webBlock[:200])
+	}
+}
+
+func TestGenerateConfig_GRPCTLS(t *testing.T) {
+	cfg := &config.Config{
+		CORS: map[string]config.CORSConfig{},
+		Ports: map[string][]string{
+			"<grpc>50051": {"grpc.example.com"},
+		},
+		OrderedPorts: []string{"<grpc>50051"},
+	}
+	certs := map[string]ssl.Certificate{
+		"grpc.example.com": {CertPath: "/certs/grpc.crt", KeyPath: "/certs/grpc.key"},
+	}
+
+	ng := GenerateConfig(cfg, certs)
+	if !strings.Contains(ng, "listen 443 ssl;\n        http2 on;") {
+		t.Fatalf("TLS gRPC block missing http2 on:\n%s", ng)
+	}
+	if !strings.Contains(ng, "grpc_pass grpc://127.0.0.1:50051;") {
+		t.Fatalf("grpc_pass missing in TLS block:\n%s", ng)
+	}
+}
+
+func TestGenerateConfig_GRPCMixedDomainSkipsGRPC(t *testing.T) {
+	cfg := &config.Config{
+		CORS: map[string]config.CORSConfig{},
+		Ports: map[string][]string{
+			"<grpc>9081": {"mixed.example.com"},
+			"8080":       {"mixed.example.com"},
+		},
+		OrderedPorts: []string{"<grpc>9081", "8080"},
+	}
+
+	ng := GenerateConfig(cfg, nil)
+	if !strings.Contains(ng, "gRPC upstream for mixed.example.com is SKIPPED") {
+		t.Fatalf("mixed domain must skip the gRPC route with a warning:\n%s", ng)
+	}
+	if strings.Contains(ng, "grpc_pass") {
+		t.Fatalf("no grpc_pass may be emitted on a mixed domain:\n%s", ng)
+	}
+	if !strings.Contains(ng, "proxy_pass http://127.0.0.1:8080;") {
+		t.Fatalf("the HTTP route must still be served:\n%s", ng)
+	}
+}

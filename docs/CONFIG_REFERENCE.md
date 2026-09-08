@@ -28,7 +28,7 @@ static_directory//url_route
 
 | Component | Required | Default | Description |
 | ----------- | ---------- | --------- | ------------- |
-| `upstream_protocol` | No | `http` | Protocol prefix: `https`, `tcp`, `udp`. Omit for `http` |
+| `upstream_protocol` | No | `http` | Protocol prefix: `https`, `grpc`, `tcp`, `udp`. Omit for `http` |
 | `domain` | No | `127.0.0.1` | IP address or hostname. IPv6 must use brackets `[::1]` |
 | `port` | No | Protocol default | Port number |
 | `routes` | No | - | URL path routing (e.g., `/api`) |
@@ -38,6 +38,7 @@ static_directory//url_route
 
 - **HTTP** (default): 80
 - **HTTPS**: 443
+- **gRPC**: 50051
 - **TCP/UDP**: Required (error if missing)
 
 ### Static Route Rules
@@ -67,6 +68,7 @@ static_directory//url_route
 | Static simple | `/app/static` | Serve `/app/static` |
 | Static with route | `/app/static//docs` | Serve `/app/static` at `/docs` |
 | Static with colon | `/app/static:v2` | Serve `/app/static:v2` |
+| gRPC upstream | `<grpc>9081` | gRPC (HTTP/2) proxy to `127.0.0.1:9081` |
 
 ## listener_key Format
 
@@ -141,6 +143,35 @@ example-server.local:8080:
   - shared.example.com
 192.168.50.2:5678/api:
   - shared.example.com/api
+```
+
+### gRPC Reverse Proxy
+
+`<grpc>` upstreams terminate HTTP/2 at nginx (`grpc_pass` to the backend over
+cleartext h2c). A domain with a certificate serves gRPC over TLS (h2 via
+ALPN); without one it serves cleartext h2c.
+
+Rules:
+
+- The listener must be a **bare domain** (optionally `domain|port`) — gRPC
+  method paths (`/package.Service/Method`) cannot live under a location
+  prefix, so path-based routing is rejected
+- A gRPC domain **cannot mix** with HTTP proxy or static routes on the same
+  server name (gRPC owns `location /`); mixed domains skip the gRPC route
+  with a visible warning comment
+- The upstream port is required in practice (`<grpc>9081`); a bare hostname
+  defaults to the conventional 50051
+
+```yaml
+# TLS gRPC (domain has a certificate) or h2c (no certificate)
+<grpc>9081:
+  - grpc.example.com
+```
+
+```bash
+# verify
+grpcurl -plaintext grpc.example.com:80 list        # h2c domain
+grpcurl grpc.example.com:443 list                  # TLS domain
 ```
 
 ### TCP/UDP Stream Forwarding

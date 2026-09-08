@@ -42,6 +42,7 @@ const (
 	ProtocolTCP    Protocol = "tcp"
 	ProtocolUDP    Protocol = "udp"
 	ProtocolStatic Protocol = "static"
+	ProtocolGRPC   Protocol = "grpc"
 )
 
 func exampleDir() string {
@@ -181,6 +182,11 @@ func (p Protocol) IsStream() bool {
 // IsStatic returns true if the protocol is static (file serving)
 func (p Protocol) IsStatic() bool {
 	return p == ProtocolStatic
+}
+
+// IsGRPC returns true if the protocol is gRPC (HTTP/2 reverse proxying).
+func (p Protocol) IsGRPC() bool {
+	return p == ProtocolGRPC
 }
 
 type Config struct {
@@ -377,6 +383,9 @@ func ParseUpstream(key string) Upstream {
 	defaultPort := "80"
 	if scheme == "https" {
 		defaultPort = "443"
+	}
+	if protocol == ProtocolGRPC {
+		defaultPort = "50051" // conventional gRPC port
 	}
 	return Upstream{
 		Scheme:   scheme,
@@ -922,6 +931,28 @@ func ValidateMapping(upstreamKey string, listenerKey string, hasCertificate bool
 		return listenConfig, errors, warnings
 	}
 
+	// gRPC upstreams: no path-based routing on either side — gRPC method
+	// paths (/package.Service/Method) cannot live under a location prefix,
+	// and the upstream address has no URL path component either.
+	if upstream.Protocol.IsGRPC() {
+		if upstream.Path != "" {
+			errors = append(errors, &MappingError{
+				Key:     upstreamKey,
+				Value:   listenerKey,
+				Message: "gRPC upstreams do not support a path suffix; remove it from the upstream key",
+			})
+			return listenConfig, errors, warnings
+		}
+		if strings.Contains(listenerKey, "/") {
+			errors = append(errors, &MappingError{
+				Key:     upstreamKey,
+				Value:   listenerKey,
+				Message: "gRPC upstreams do not support path-based routing; the listener must be a bare domain (optionally with |port)",
+			})
+			return listenConfig, errors, warnings
+		}
+	}
+
 	// Determine effective listen protocol
 	if upstream.Protocol.IsStream() {
 		// Upstream is TCP or UDP
@@ -946,7 +977,7 @@ func ValidateMapping(upstreamKey string, listenerKey string, hasCertificate bool
 			// Smart mode: use upstream protocol
 			listenConfig.Protocol = upstream.Protocol
 		}
-	} else if upstream.Protocol.IsHTTP() || upstream.Protocol == ProtocolStatic {
+	} else if upstream.Protocol.IsHTTP() || upstream.Protocol.IsGRPC() || upstream.Protocol == ProtocolStatic {
 		// Upstream is HTTP, HTTPS, or Static
 		if explicitProtocol {
 			// User explicitly specified listen protocol

@@ -124,6 +124,10 @@ routes to it (`example.com`, `example.com/api`, `example.com|8443`,
 <tcp>9122:
   - 8122
 
+# gRPC reverse proxy (h2c; TLS+h2 when the domain has a certificate)
+<grpc>9081:
+  - grpc.example.com
+
 # Static site (relative path, . = /app)
 ./static:
   - static.example.com

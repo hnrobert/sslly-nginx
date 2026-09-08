@@ -348,6 +348,27 @@ func formatUpstreamAddr(upstream config.Upstream) string {
 	return fmt.Sprintf("%s:%s", host, upstream.Port)
 }
 
+// formatGRPCAddr renders the grpc_pass target (plain h2c to the upstream).
+func formatGRPCAddr(upstream config.Upstream) string {
+	return "grpc://" + formatUpstreamAddr(upstream)
+}
+
+// grpcRouteFor returns the gRPC route of a domain when ALL its proxy routes
+// are gRPC and it has no static routes (a gRPC domain serves location / via
+// grpc_pass, so nothing else may share the server block). ok=false when the
+// domain has no gRPC routes or mixes gRPC with other kinds.
+func grpcRouteFor(routes []RouteConfig, staticSiteRoutes []StaticRouteConfig) (RouteConfig, bool) {
+	if len(routes) == 0 || len(staticSiteRoutes) > 0 {
+		return RouteConfig{}, false
+	}
+	for _, r := range routes {
+		if !r.Upstream.Protocol.IsGRPC() {
+			return RouteConfig{}, false
+		}
+	}
+	return routes[0], true
+}
+
 func GenerateConfig(cfg *config.Config, certMap map[string]ssl.Certificate) string {
 	// Build a set of paths that should not have trailing slash redirects.
 	noTrailingSlash := make(map[string]bool, len(cfg.NoTrailingSlash))
@@ -659,6 +680,22 @@ events {
 		corsConfig := getCORSConfig(cfg, baseDomain)
 
 		if !hasCert {
+			// gRPC-only domain: h2c (cleartext HTTP/2) server block.
+			if grpcRoute, ok := grpcRouteFor(routes, staticSiteRoutes); ok {
+				sb.WriteString(fmt.Sprintf(`    # HTTP server block for %s (no SSL, gRPC/h2c)
+    server {
+        listen %s;
+        http2 on;
+        server_name %s;
+
+`, baseDomain, httpPort, baseDomain))
+				generateGRPCLocation(&sb, grpcRoute)
+				sb.WriteString(`    }
+
+`)
+				continue
+			}
+
 			// No certificate found - create HTTP-only server block
 			sb.WriteString(fmt.Sprintf(`    # HTTP server block for %s (no SSL)
     server {
@@ -684,10 +721,10 @@ events {
 		}
 
 		// Certificate found - create HTTPS server block
-		sb.WriteString(fmt.Sprintf(`    # HTTPS server block for %s
+		header := `    # HTTPS server block for %s
     server {
         listen %s ssl;
-        server_name %s;
+        %s server_name %s;
         ssl_certificate %s;
         ssl_certificate_key %s;
 
@@ -695,7 +732,22 @@ events {
         ssl_ciphers HIGH:!aNULL:!MD5;
         ssl_prefer_server_ciphers on;
 
-`, baseDomain, httpsPort, baseDomain, cert.CertPath, cert.KeyPath))
+`
+		// gRPC-only domain over TLS: negotiate h2 via ALPN.
+		http2Line := ""
+		if _, ok := grpcRouteFor(routes, staticSiteRoutes); ok {
+			http2Line = "http2 on;\n        "
+		}
+		sb.WriteString(fmt.Sprintf(header, baseDomain, httpsPort, http2Line, baseDomain, cert.CertPath, cert.KeyPath))
+
+		// gRPC-only domain: one location / via grpc_pass.
+		if grpcRoute, ok := grpcRouteFor(routes, staticSiteRoutes); ok {
+			generateGRPCLocation(&sb, grpcRoute)
+			sb.WriteString(`    }
+
+`)
+			continue
+		}
 
 		// Generate location blocks for static sites
 		if len(staticSiteRoutes) > 0 {
@@ -715,6 +767,20 @@ events {
 	sb.WriteString("}\n")
 
 	return sb.String()
+}
+
+// generateGRPCLocation emits the single location / that proxies a gRPC-only
+// domain. The upstream is always reached over cleartext h2c; TLS (and h2 via
+// ALPN) is terminated by nginx when the domain has a certificate.
+func generateGRPCLocation(sb *strings.Builder, route RouteConfig) {
+	fmt.Fprintf(sb, `        # gRPC reverse proxy (upstream over cleartext h2c)
+        location / {
+            grpc_pass %s;
+            grpc_read_timeout 3600s;
+            grpc_send_timeout 3600s;
+        }
+
+`, formatGRPCAddr(route.Upstream))
 }
 
 // generateStaticSiteLocations generates nginx location blocks for static sites
@@ -808,6 +874,14 @@ func generateProxyLocations(sb *strings.Builder, routes []RouteConfig, corsConfi
 	sortRoutesByPathLength(routes)
 
 	for _, route := range routes {
+		// A gRPC route only fits a gRPC-ONLY domain (it owns location /).
+		// Mixed domains drop it with a visible comment instead of emitting a
+		// duplicate location / that would fail nginx -t.
+		if route.Upstream.Protocol.IsGRPC() {
+			fmt.Fprintf(sb, `        # WARNING: gRPC upstream for %s is SKIPPED — a gRPC domain must not mix with HTTP proxy/static routes on the same server name
+`, route.DomainPath)
+			continue
+		}
 		upstreamAddr := formatUpstreamAddr(route.Upstream)
 		locationPath := route.Path
 		if locationPath == "" {
