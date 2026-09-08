@@ -44,8 +44,23 @@ func GenerateConfig(cfg *config.Config, certMap map[string]ssl.Certificate) stri
 	var streamMappings []StreamMapping
 	httpPorts := make(map[string]bool)
 
+	// Iterate in proxy.yaml declaration order (OrderedPorts) so the stream
+	// block's upstream/listen emission is deterministic across reloads —
+	// map iteration order would reshuffle them every generation. Fall back
+	// to the raw map only when order info is unavailable.
+	orderedKeys := cfg.OrderedPorts
+	if len(orderedKeys) == 0 {
+		for k := range cfg.Ports {
+			orderedKeys = append(orderedKeys, k)
+		}
+	}
+
 	// First pass: identify stream mappings, HTTP ports, and static sites
-	for portKey, domainPaths := range cfg.Ports {
+	for _, portKey := range orderedKeys {
+		domainPaths, ok := cfg.Ports[portKey]
+		if !ok {
+			continue
+		}
 		// Check if it's a static site key - they use HTTP/HTTPS ports
 		if config.IsStaticSiteKey(portKey) {
 			httpPorts[httpPort] = true

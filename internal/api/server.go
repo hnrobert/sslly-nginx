@@ -94,7 +94,7 @@ func New(cfg Config) *Server {
 
 	s.grpcServer = grpc.NewServer(grpc.ChainUnaryInterceptor(
 		recoveryInterceptor,
-		auditInterceptor,
+		auditInterceptor(cfg.Users),
 		authInterceptor(cfg.Users),
 	))
 	v1.RegisterProxyServiceServer(s.grpcServer, &proxyService{srv: s})

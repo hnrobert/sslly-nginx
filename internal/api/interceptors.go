@@ -38,21 +38,32 @@ func recoveryInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInf
 }
 
 // auditInterceptor logs every call (including auth failures — it chains
-// outside the auth interceptor) with the resulting status code.
-func auditInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-	start := time.Now()
-	resp, err := handler(ctx, req)
-	user := "anonymous"
-	if u := userFromContext(ctx); u != nil {
-		user = u.Name
+// outside the auth interceptor, so the authenticated user is not in the
+// context yet) with the resulting status code. The user name for the log is
+// resolved from the bearer token in the request metadata.
+func auditInterceptor(users *config.UserStore) grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		start := time.Now()
+		resp, err := handler(ctx, req)
+
+		user := "anonymous"
+		if u := userFromContext(ctx); u != nil {
+			user = u.Name // set by an inner auth pass (unusual ordering)
+		} else if md, ok := metadata.FromIncomingContext(ctx); ok {
+			if tok := bearerToken(md); tok != "" {
+				if u, verr := users.VerifyToken(tok); verr == nil {
+					user = u.Name
+				}
+			}
+		}
+		code := codes.OK
+		if err != nil {
+			code = status.Code(err)
+		}
+		logger.Info("API method=%s user=%s code=%s duration=%s",
+			info.FullMethod, user, code, time.Since(start).Round(time.Millisecond))
+		return resp, err
 	}
-	code := codes.OK
-	if err != nil {
-		code = status.Code(err)
-	}
-	logger.Info("API method=%s user=%s code=%s duration=%s",
-		info.FullMethod, user, code, time.Since(start).Round(time.Millisecond))
-	return resp, err
 }
 
 // authAllowlist are method prefixes that skip bearer authentication.
