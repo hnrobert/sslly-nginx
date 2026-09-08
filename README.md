@@ -389,8 +389,7 @@ The `docker-compose.yml` is configured with:
 
 - `SSLLY_DEFAULT_HTTP_LISTEN_PORT` (default: `80`) — port Nginx listens for HTTP and redirects to HTTPS
 - `SSLLY_DEFAULT_HTTPS_LISTEN_PORT` (default: `443`) — port Nginx listens for HTTPS
-- `SSLLY_API_HTTP_ADDR` (default: `:9080`) — control API HTTP/JSON endpoint
-- `SSLLY_API_GRPC_ADDR` (default: `:9081`) — control API native gRPC endpoint
+- `SSLLY_API_HTTP_ADDR` / `SSLLY_API_GRPC_ADDR` — control API addresses; **unset by default, which disables the API entirely**. E.g. `127.0.0.1:9080` when only the local nginx reaches it (reverse-proxy it via a `proxy.yaml` route)
 - `SSLLY_API_ADMIN_TOKEN` — bootstrap admin token, hashed into `configs/users.yaml` on first boot
 
 > **Note:** The legacy environment variables `SSL_NGINX_HTTP_PORT` and `SSL_NGINX_HTTPS_PORT` are still supported for backward compatibility but are deprecated.

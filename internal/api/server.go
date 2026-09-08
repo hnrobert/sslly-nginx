@@ -27,15 +27,22 @@ import (
 
 // Env-var names (documented in docs/API.md):
 //
-//	SSLLY_API_HTTP_ADDR   gateway JSON endpoint (default ":9080")
-//	SSLLY_API_GRPC_ADDR   native gRPC endpoint   (default ":9081")
+//	SSLLY_API_HTTP_ADDR   gateway JSON endpoint (e.g. ":9080" or "127.0.0.1:9080")
+//	SSLLY_API_GRPC_ADDR   native gRPC endpoint (e.g. ":9081" or "127.0.0.1:9081")
+//
+// The control API is DISABLED unless at least one of these is set — no
+// listener is opened and no ports are taken by default. When only
+// SSLLY_API_HTTP_ADDR is set, the gRPC backend binds an ephemeral loopback
+// port automatically.
 const (
 	EnvHTTPAddr   = "SSLLY_API_HTTP_ADDR"
 	EnvGRPCAddr   = "SSLLY_API_GRPC_ADDR"
 	EnvAdminToken = "SSLLY_API_ADMIN_TOKEN"
 
-	defaultHTTPAddr = ":9080"
-	defaultGRPCAddr = ":9081"
+	// internalGRPCAddr is used when only the HTTP gateway is enabled: the
+	// gRPC backend the gateway dials binds an ephemeral loopback port and is
+	// not reachable from outside.
+	internalGRPCAddr = "127.0.0.1:0"
 
 	// APIPrefix is the URL prefix every gateway route is mounted under
 	// (POST <APIPrefix>/<RpcName>). Bumping or changing it is a serving-layer
@@ -61,6 +68,7 @@ type Config struct {
 // Server is the control-plane dual stack.
 type Server struct {
 	cfg        Config
+	disabled   bool // both addresses unset: no listeners, Start is a no-op
 	grpcServer *grpc.Server
 	conn       *grpc.ClientConn
 	httpServer *http.Server
@@ -70,14 +78,19 @@ type Server struct {
 
 // New builds the gRPC server (interceptors + services + health + reflection).
 // Call Start to listen, or ServeGRPC/GatewayHandler directly in tests.
+// With both Config.GRPCAddr and Config.HTTPAddr empty the server is DISABLED:
+// Start/Stop become no-ops. With only HTTPAddr set, the gRPC backend binds
+// an internal ephemeral loopback port.
 func New(cfg Config) *Server {
-	if cfg.GRPCAddr == "" {
-		cfg.GRPCAddr = defaultGRPCAddr
-	}
-	if cfg.HTTPAddr == "" {
-		cfg.HTTPAddr = defaultHTTPAddr
-	}
 	s := &Server{cfg: cfg}
+	if cfg.GRPCAddr == "" && cfg.HTTPAddr == "" {
+		s.disabled = true
+		return s
+	}
+	if cfg.GRPCAddr == "" {
+		cfg.GRPCAddr = internalGRPCAddr
+		s.cfg = cfg
+	}
 
 	s.grpcServer = grpc.NewServer(grpc.ChainUnaryInterceptor(
 		recoveryInterceptor,
@@ -95,6 +108,10 @@ func New(cfg Config) *Server {
 
 // Start brings up both listeners. It returns once both are serving.
 func (s *Server) Start() error {
+	if s.disabled {
+		return nil // no addresses configured: nothing to serve
+	}
+
 	lis, err := net.Listen("tcp", s.cfg.GRPCAddr)
 	if err != nil {
 		return fmt.Errorf("listen grpc %s: %w", s.cfg.GRPCAddr, err)
@@ -105,6 +122,12 @@ func (s *Server) Start() error {
 			logger.Error("API grpc serve stopped: %v", err)
 		}
 	}()
+
+	if s.cfg.HTTPAddr == "" {
+		// gRPC-only mode: no gateway to dial or serve.
+		logger.Info("API listening: grpc=%s (http gateway disabled)", s.grpcAddr)
+		return nil
+	}
 
 	conn, err := s.dialGRPC(context.Background(), s.grpcAddr)
 	if err != nil {
@@ -136,8 +159,14 @@ func (s *Server) Start() error {
 	return nil
 }
 
+// Disabled reports whether the control API is off (no addresses configured).
+func (s *Server) Disabled() bool { return s.disabled }
+
 // ServeGRPC serves gRPC on the given listener (blocking). Test entrypoint.
 func (s *Server) ServeGRPC(lis net.Listener) error {
+	if s.disabled || s.grpcServer == nil {
+		return errors.New("api server is disabled")
+	}
 	s.grpcAddr = lis.Addr().String()
 	return s.grpcServer.Serve(lis)
 }

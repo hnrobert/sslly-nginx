@@ -8,14 +8,25 @@ body.
 
 ## Endpoints & environment
 
-| Variable                 | Default | Purpose                          |
-| ------------------------ | ------- | -------------------------------- |
-| `SSLLY_API_HTTP_ADDR`    | `:9080` | HTTP/JSON gateway (this API)     |
-| `SSLLY_API_GRPC_ADDR`    | `:9081` | Native gRPC (grpcurl / clients)  |
-| `SSLLY_API_ADMIN_TOKEN`  | —       | Bootstrap admin token (see Auth) |
+| Variable                | Default | Purpose                                          |
+| ----------------------- | ------- | ------------------------------------------------ |
+| `SSLLY_API_HTTP_ADDR`   | *unset* | HTTP/JSON gateway address, e.g. `127.0.0.1:9080` |
+| `SSLLY_API_GRPC_ADDR`   | *unset* | Native gRPC address, e.g. `127.0.0.1:9081`       |
+| `SSLLY_API_ADMIN_TOKEN` | —       | Bootstrap admin token (see Auth)                 |
 
-The compose file binds both ports on the host network. `GET /healthz` on the
-HTTP port answers unauthenticated `{"status":"ok"}` for probes.
+**The control API is disabled by default** — no listener is opened until at
+least one address is explicitly set. Setting only `SSLLY_API_HTTP_ADDR`
+keeps the JSON gateway serving with the gRPC backend on an internal loopback
+port; setting only `SSLLY_API_GRPC_ADDR` serves plain gRPC.
+
+`GET /healthz` on the HTTP port answers unauthenticated `{"status":"ok"}` for
+probes. To reach the gateway remotely without opening ports, reverse-proxy it
+through sslly-nginx itself — one proxy.yaml route is enough:
+
+```yaml
+9080:
+  - your.domain/api   # https://your.domain/api/v1/<RpcName> -> gateway
+```
 
 ### Client SDKs
 

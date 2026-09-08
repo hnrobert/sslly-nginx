@@ -91,6 +91,10 @@ func newTestEnv(t *testing.T) *testEnv {
 	e := &testEnv{dir: dir, adminToken: "admin-token", opsToken: "ops-token"}
 	bufLis := bufconn.Listen(1 << 20)
 	srv := New(Config{
+		// Placeholder addresses: bufconn mode never listens on TCP, but New
+		// must not treat this server as disabled (both addrs unset = off).
+		GRPCAddr:  "bufnet",
+		HTTPAddr:  "bufnet",
 		ConfigDir: dir,
 		Reload:    e.reload,
 		Users:     config.LoadUserStore(dir),
@@ -516,5 +520,58 @@ func TestServerStartStopLifecycle(t *testing.T) {
 	srv.Stop(ctx)
 	if _, err := http.Post(base+"/healthz", "application/json", nil); err == nil {
 		t.Fatal("http listener should be closed after Stop")
+	}
+}
+
+// TestServerDisabledWithoutAddresses: with both addresses unset the control
+// API must not open any listener — Start/Stop are no-ops.
+func TestServerDisabledWithoutAddresses(t *testing.T) {
+	dir := t.TempDir()
+	setupTestConfigs(t, dir)
+
+	srv := New(Config{ConfigDir: dir}) // no GRPCAddr / HTTPAddr
+	if !srv.Disabled() {
+		t.Fatal("expected server to be disabled without addresses")
+	}
+	if err := srv.Start(); err != nil {
+		t.Fatalf("disabled Start must be a no-op: %v", err)
+	}
+	srv.Stop(context.Background()) // must not panic or block
+}
+
+// TestServerHTTPOnlyUsesInternalGRPC: setting only the HTTP address keeps the
+// JSON gateway serving while the gRPC backend stays on an internal loopback
+// port.
+func TestServerHTTPOnlyUsesInternalGRPC(t *testing.T) {
+	dir := t.TempDir()
+	setupTestConfigs(t, dir)
+
+	srv := New(Config{
+		HTTPAddr:  "127.0.0.1:0",
+		ConfigDir: dir,
+		Users:     config.LoadUserStore(dir),
+		Editor:    config.NewEditor(dir),
+	})
+	if srv.Disabled() {
+		t.Fatal("http-only config must not be disabled")
+	}
+	if err := srv.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { srv.Stop(context.Background()) })
+
+	// The gRPC backend must be loopback (not exposed).
+	if !strings.HasPrefix(srv.grpcAddr, "127.0.0.1:") {
+		t.Fatalf("internal gRPC must bind loopback, got %s", srv.grpcAddr)
+	}
+
+	// The gateway answers on the real listener.
+	resp, err := http.Post("http://"+srv.httpLis.Addr().String()+"/healthz", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("healthz = %d", resp.StatusCode)
 	}
 }

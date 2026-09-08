@@ -158,39 +158,44 @@ func (a *App) Start() error {
 	a.saveGoodConfiguration()
 	a.recordAppliedConfigHash()
 
-	// Control API: bootstrap users.yaml (first boot creates a full-access
-	// admin from SSLLY_API_ADMIN_TOKEN or a random one-time token), then
-	// start the gRPC + gateway dual stack.
-	if token, err := config.EnsureUsersFile(configDir, os.Getenv(api.EnvAdminToken)); err != nil {
-		return fmt.Errorf("failed to bootstrap control API users: %w", err)
-	} else if token != "" {
-		logger.Warn("Control API admin token (random, shown ONCE — save it now): %s", token)
-	}
-	a.editor = config.NewEditor(configDir)
+	// Control API: DISABLED unless SSLLY_API_HTTP_ADDR / SSLLY_API_GRPC_ADDR
+	// is explicitly set — no listener, and no users.yaml bootstrap either.
+	grpcAddr := os.Getenv(api.EnvGRPCAddr)
+	httpAddr := os.Getenv(api.EnvHTTPAddr)
+	if grpcAddr == "" && httpAddr == "" {
+		logger.Info("Control API disabled (set SSLLY_API_HTTP_ADDR and/or SSLLY_API_GRPC_ADDR to enable)")
+	} else {
+		if token, err := config.EnsureUsersFile(configDir, os.Getenv(api.EnvAdminToken)); err != nil {
+			return fmt.Errorf("failed to bootstrap control API users: %w", err)
+		} else if token != "" {
+			logger.Warn("Control API admin token (random, shown ONCE — save it now): %s", token)
+		}
+		a.editor = config.NewEditor(configDir)
 
-	// Cold-start migration: convert any plaintext `token` fields in
-	// users.yaml to token_hash and strip them (hot reloads never do this —
-	// they verify against the token field directly instead).
-	if n, err := a.editor.MigrateTokensToHashes(); err != nil {
-		logger.Warn("users.yaml token migration failed; token fields stay in place and remain usable: %v", err)
-	} else if n > 0 {
-		logger.Info("Converted %d plaintext token(s) in users.yaml to token_hash", n)
-	}
+		// Cold-start migration: convert any plaintext `token` fields in
+		// users.yaml to token_hash and strip them (hot reloads never do this —
+		// they verify against the token field directly instead).
+		if n, err := a.editor.MigrateTokensToHashes(); err != nil {
+			logger.Warn("users.yaml token migration failed; token fields stay in place and remain usable: %v", err)
+		} else if n > 0 {
+			logger.Info("Converted %d plaintext token(s) in users.yaml to token_hash", n)
+		}
 
-	a.users = config.LoadUserStore(configDir)
-	apiSrv := api.New(api.Config{
-		GRPCAddr:    os.Getenv(api.EnvGRPCAddr),
-		HTTPAddr:    os.Getenv(api.EnvHTTPAddr),
-		ConfigDir:   configDir,
-		Reload:      a.ApplyReload,
-		Users:       a.users,
-		Editor:      a.editor,
-		CertDomains: a.certDomainSet,
-	})
-	if err := apiSrv.Start(); err != nil {
-		return fmt.Errorf("failed to start control API: %w", err)
+		a.users = config.LoadUserStore(configDir)
+		apiSrv := api.New(api.Config{
+			GRPCAddr:    grpcAddr,
+			HTTPAddr:    httpAddr,
+			ConfigDir:   configDir,
+			Reload:      a.ApplyReload,
+			Users:       a.users,
+			Editor:      a.editor,
+			CertDomains: a.certDomainSet,
+		})
+		if err := apiSrv.Start(); err != nil {
+			return fmt.Errorf("failed to start control API: %w", err)
+		}
+		a.apiServer = apiSrv
 	}
-	a.apiServer = apiSrv
 
 	// Setup watchers
 	if err := a.setupWatchers(); err != nil {
