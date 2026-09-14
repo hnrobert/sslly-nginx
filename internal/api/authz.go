@@ -8,12 +8,14 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// Resource is what a request touches: an optional base domain (lowercased)
-// and/or a proxy.yaml upstream key. Empty string means "not applicable" and
-// fails closed against a rule restricted on that dimension.
+// Resource is what a request touches: an optional base domain (lowercased),
+// a proxy.yaml upstream key, and the group the entry lives in ("a.b" dotted
+// path; "" = top level). Empty string means "not applicable" and fails
+// closed against a rule restricted on that dimension.
 type Resource struct {
 	Domain      string
 	UpstreamKey string
+	Group       string
 }
 
 // domainOfListener extracts the base domain from a listener key:
@@ -36,14 +38,14 @@ func domainOfListener(key string) string {
 }
 
 // entryResources builds the resource set of an upstream entry: the upstream
-// key paired with each listener's domain.
-func entryResources(upstreamKey string, listenerKeys []string) []Resource {
+// key (and its group) paired with each listener's domain.
+func entryResources(group, upstreamKey string, listenerKeys []string) []Resource {
 	res := make([]Resource, 0, len(listenerKeys))
 	for _, lk := range listenerKeys {
-		res = append(res, Resource{Domain: domainOfListener(lk), UpstreamKey: upstreamKey})
+		res = append(res, Resource{Domain: domainOfListener(lk), UpstreamKey: upstreamKey, Group: group})
 	}
 	if len(res) == 0 {
-		res = append(res, Resource{UpstreamKey: upstreamKey})
+		res = append(res, Resource{UpstreamKey: upstreamKey, Group: group})
 	}
 	return res
 }
@@ -107,18 +109,45 @@ func modeSatisfied(ruleMode, want string) bool {
 
 func allCovered(p *config.Permission, resources []Resource) bool {
 	for _, r := range resources {
-		if !upstreamCovered(p.Upstreams, r.UpstreamKey) || !domainCovered(p.Domains, r.Domain) {
+		if !upstreamCovered(p.Upstreams, r) || !domainCovered(p.Domains, r.Domain) {
 			return false
 		}
 	}
 	return true
 }
 
-func upstreamCovered(selectors []string, key string) bool {
+// upstreamCovered matches the upstream-selectors of a rule against a
+// resource. Three selector forms:
+//
+//   - "8080"                       — bare upstream key, ANY group (top level
+//     and grouped entries alike); matches verbatim, including keys that
+//     themselves contain "/" (path-routed upstreams like "host:port/api");
+//   - "class1/8080"                — an entry with upstream key 8080 inside
+//     exactly group class1;
+//   - "class1/*"                   — every entry inside group class1.
+func upstreamCovered(selectors []string, res Resource) bool {
 	if len(selectors) == 0 || contains(selectors, "*") {
 		return true
 	}
-	return contains(selectors, key)
+	for _, sel := range selectors {
+		if sel == res.UpstreamKey {
+			// Exact bare-key match wins first, so slash-containing upstream
+			// keys are never mistaken for group/key selectors.
+			return true
+		}
+		slash := strings.LastIndex(sel, "/")
+		if slash <= 0 || slash == len(sel)-1 {
+			continue // not a group/key or group/* form
+		}
+		group, tail := sel[:slash], sel[slash+1:]
+		if group != res.Group {
+			continue
+		}
+		if tail == "*" || tail == res.UpstreamKey {
+			return true
+		}
+	}
+	return false
 }
 
 func domainCovered(patterns []string, domain string) bool {

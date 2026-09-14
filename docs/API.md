@@ -115,21 +115,26 @@ JSON fields are camelCase. `apply` in responses reports the reload outcome:
 `{"applied": true}` or `{"applied": false, "error": "health check: ..."}`
 with the YAML rolled back.
 
-| RPC                | Path                     | Body                                        |
-| ------------------ | ------------------------ | ------------------------------------------- |
-| ListProxyEntries   | `/v1/ListProxyEntries`   | `{}`                                        |
-| SetProxyEntry      | `/v1/SetProxyEntry`      | `{"entry": {...}}`                          |
-| DeleteProxyEntry   | `/v1/DeleteProxyEntry`   | `{"upstreamKey": "1234"}`                   |
-| GetNoTrailingSlash | `/v1/GetNoTrailingSlash` | `{}`                                        |
-| SetNoTrailingSlash | `/v1/SetNoTrailingSlash` | `{"listenerKeys": ["a/b"]}`                 |
-| ListCorsRules      | `/v1/ListCorsRules`      | `{}`                                        |
-| SetCorsRule        | `/v1/SetCorsRule`        | `{"rule": {...}, "updateMask": "..."}`      |
-| DeleteCorsRule     | `/v1/DeleteCorsRule`     | `{"key": "*.example.com"}`                  |
-| GetLogsConfig      | `/v1/GetLogsConfig`      | `{}`                                        |
-| UpdateLogsConfig   | `/v1/UpdateLogsConfig`   | `{"config": {...}, "updateMask": "..."}`    |
-| ListUsers          | `/v1/ListUsers`          | `{}`                                        |
-| UpsertUser         | `/v1/UpsertUser`         | `{"user": {...}, "token": "new-plaintext"}` |
-| DeleteUser         | `/v1/DeleteUser`         | `{"name": "ops"}`                           |
+| RPC                | Path                     | Body                                          |
+|--------------------|--------------------------|-----------------------------------------------|
+| ------------------ | ------------------------ | -------------------------------------------   |
+| ListProxyEntries   | `/v1/ListProxyEntries`   | `{}`                                          |
+| SetProxyEntry      | `/v1/SetProxyEntry`      | `{"entry": {...}}`                            |
+| DeleteProxyEntry   | `/v1/DeleteProxyEntry`   | `{"upstreamKey": "1234"}`                     |
+| GetNoTrailingSlash | `/v1/GetNoTrailingSlash` | `{}`                                          |
+| SetNoTrailingSlash | `/v1/SetNoTrailingSlash` | `{"listenerKeys": ["a/b"]}`                   |
+| ListCorsRules      | `/v1/ListCorsRules`      | `{}`                                          |
+| SetCorsRule        | `/v1/SetCorsRule`        | `{"rule": {...}, "updateMask": "..."}`        |
+| DeleteCorsRule     | `/v1/DeleteCorsRule`     | `{"key": "*.example.com"}`                    |
+| GetLogsConfig      | `/v1/GetLogsConfig`      | `{}`                                          |
+| UpdateLogsConfig   | `/v1/UpdateLogsConfig`   | `{"config": {...}, "updateMask": "..."}`      |
+| ListUsers          | `/v1/ListUsers`          | `{}`                                          |
+| UpsertUser         | `/v1/UpsertUser`         | `{"user": {...}, "token": "new-plaintext"}`   |
+| DeleteUser         | `/v1/DeleteUser`         | `{"name": "ops"}`                             |
+| RPC                | Path                     | Body                                          |
+| ------------       | ------------------       | --------------------------------------------- |
+| DeployStatic       | `/v1/DeployStatic`       | `{"domain": "app.x.com", "distZip": "<b64>"}` |
+| DeleteStatic       | `/v1/DeleteStatic`       | `{"domain": "app.x.com", "group": ""}`        |
 
 The same names work over native gRPC (`hnrobert.sslly.v1.ProxyService.ListProxyEntries` etc.).
 
@@ -170,6 +175,42 @@ Enum values use their full names, e.g.
 `"surface": "E_PERMISSION_SURFACE_CORS"`, `"mode": "E_PERMISSION_MODE_READ_WRITE"`.
 An empty `token` keeps the existing hash; responses never contain token
 material. Changes apply immediately (no reload).
+
+### Static deployments (`DeployService`)
+
+`DeployStatic` publishes a static site end-to-end: upload a dist **zip**
+(base64 in `distZip` over JSON; raw bytes over gRPC) plus a `domain`
+(optionally with a `/path` prefix) and an optional proxy.yaml `group` —
+sslly-nginx unpacks it under its deploy root (`SSLLY_DEPLOY_DIR`, default
+`./static/deploy` — inside the existing static volume, so no extra mount),
+writes the static route, and runs the validated reload. Redeploying the same
+domain overwrites the previous files (no version history). A single
+top-level wrapper directory in the archive is stripped automatically; an
+`index.html` enables SPA fallback. `DeleteStatic` removes route + files.
+
+```bash
+ZIP_B64=$(base64 -i dist.zip | tr -d '\n')
+curl -s -X POST https://host/api/v1/DeployStatic \
+   -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+   -d "{\"domain\":\"app.example.com\",\"distZip\":\"$ZIP_B64\"}"
+```
+
+Requires the `deploy` surface (resource = the target domain).
+
+### Groups
+
+`proxy.yaml` routes can live in groups (`class1: { 1234: [...] }`) — see
+[CONFIG_REFERENCE](CONFIG_REFERENCE.md#route-groups). API entries carry a
+`group` field (`"a.b"` dotted path; empty = top level); the same upstream
+key may exist in several groups (List shows one entry per group). Permission
+`upstreams` selectors accept `group/key` and `group/*` forms alongside bare
+keys (bare keys match any group):
+
+```yaml
+- surface: proxy
+  mode: read-write
+  upstreams: ["web/*", "web.front/8080", "9090"]
+```
 
 ## How mutations are applied
 

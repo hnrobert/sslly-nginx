@@ -243,6 +243,8 @@ func surfaceFromProto(e v1.EPermissionSurface) (string, error) {
 		return config.SurfaceLogs, nil
 	case v1.EPermissionSurface_E_PERMISSION_SURFACE_USERS:
 		return config.SurfaceUsers, nil
+	case v1.EPermissionSurface_E_PERMISSION_SURFACE_DEPLOY:
+		return config.SurfaceDeploy, nil
 	}
 	return "", fmt.Errorf("unknown permission surface %v", e)
 }

@@ -100,6 +100,13 @@ type Config struct {
 	// Runtime-only (not persisted to YAML).
 	OrderedPorts []string `yaml:"-"`
 
+	// EntryGroups records, for every upstream key that appears inside one or
+	// more GROUP mappings, the dotted group paths it appeared in ("a.b" form),
+	// in declaration order. Top-level entries are absent. Groups are purely
+	// organizational: Ports/OrderedPorts behave as if the file were flat.
+	// Runtime-only (not persisted to YAML).
+	EntryGroups map[string][]string `yaml:"-"`
+
 	// RuntimeStaticSites stores static site information for nginx config generation.
 	// Key is the original config key (e.g., "/app/static" or "[/app/static]/route").
 	// It is runtime-only (not persisted to YAML).

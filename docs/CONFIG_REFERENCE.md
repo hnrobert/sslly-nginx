@@ -145,6 +145,37 @@ example-server.local:8080:
   - shared.example.com/api
 ```
 
+### Route Groups
+
+Routes can be organized under group mappings — a top-level key whose value is
+a MAPPING is a group; a SEQUENCE value is a route (that holds at any depth,
+so upstream keys containing dots or slashes stay unambiguous):
+
+```yaml
+1234:                 # plain top-level route
+  - a.example.com
+
+class1:               # group (nested form)
+  1234:               # the SAME key may appear in several groups /
+    - asd.asd.com     # and at top level: listeners merge in declaration order
+  9090:
+    - b.example.com
+
+a.b:                  # flat dotted form == nested a: { b: { ... } }
+  8080:
+    - c.example.com
+```
+
+- Group path segments match `[a-zA-Z0-9_-]+`; dots only separate levels.
+- Reserved names (`cors`, `log`, `no_trailing_slash`) cannot be group segments.
+- Groups are **purely organizational**: after flattening, routing behaves
+  exactly as if the file were flat; nginx output order follows first
+  appearance.
+- The control API's `SetProxyEntry`/`DeleteProxyEntry` take a `group` field
+  ("a.b"; empty = top level); the editor always writes the canonical nested
+  form. `upstreams` permission selectors understand `group/key` and
+  `group/*` (see [API.md](API.md)).
+
 ### gRPC Reverse Proxy
 
 `<grpc>` upstreams terminate HTTP/2 at nginx (`grpc_pass` to the backend over

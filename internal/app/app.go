@@ -190,6 +190,7 @@ func (a *App) Start() error {
 			Users:       a.users,
 			Editor:      a.editor,
 			CertDomains: a.certDomainSet,
+			DeployDir:   os.Getenv("SSLLY_DEPLOY_DIR"),
 		})
 		if err := apiSrv.Start(); err != nil {
 			return fmt.Errorf("failed to start control API: %w", err)

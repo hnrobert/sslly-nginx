@@ -22,10 +22,11 @@ const usersConfigFile = "users.yaml"
 
 // Permission surfaces (config faces) and access modes for the control API.
 const (
-	SurfaceProxy = "proxy"
-	SurfaceCORS  = "cors"
-	SurfaceLogs  = "logs"
-	SurfaceUsers = "users"
+	SurfaceProxy  = "proxy"
+	SurfaceCORS   = "cors"
+	SurfaceLogs   = "logs"
+	SurfaceUsers  = "users"
+	SurfaceDeploy = "deploy" // static dist uploads (resource = domain)
 
 	ModeRead      = "read"
 	ModeReadWrite = "read-write"
@@ -130,7 +131,7 @@ func validateUsers(users []User) error {
 		}
 		for _, p := range u.Permissions {
 			switch p.Surface {
-			case SurfaceProxy, SurfaceCORS, SurfaceLogs, SurfaceUsers:
+			case SurfaceProxy, SurfaceCORS, SurfaceLogs, SurfaceUsers, SurfaceDeploy:
 			default:
 				return fmt.Errorf("users file invalid: user %q has unknown surface %q", u.Name, p.Surface)
 			}
@@ -199,6 +200,8 @@ users:
       - surface: logs
         mode: read-write
       - surface: users
+        mode: read-write
+      - surface: deploy
         mode: read-write
 `
 

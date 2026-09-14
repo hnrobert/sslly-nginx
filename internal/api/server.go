@@ -62,6 +62,7 @@ type Config struct {
 	Users       *config.UserStore
 	Editor      *config.Editor
 	CertDomains func() map[string]bool
+	DeployDir   string
 	Dial        func(ctx context.Context, target string) (*grpc.ClientConn, error)
 }
 
@@ -101,6 +102,7 @@ func New(cfg Config) *Server {
 	v1.RegisterCorsServiceServer(s.grpcServer, &corsService{srv: s})
 	v1.RegisterLogsServiceServer(s.grpcServer, &logsService{srv: s})
 	v1.RegisterUsersServiceServer(s.grpcServer, &usersService{srv: s})
+	v1.RegisterDeployServiceServer(s.grpcServer, &deployService{srv: s})
 	healthpb.RegisterHealthServer(s.grpcServer, health.NewServer())
 	reflection.Register(s.grpcServer)
 	return s
@@ -192,6 +194,9 @@ func (s *Server) gatewayHandler(ctx context.Context, conn *grpc.ClientConn) (htt
 		return nil, err
 	}
 	if err := v1.RegisterUsersServiceHandler(ctx, gw, conn); err != nil {
+		return nil, err
+	}
+	if err := v1.RegisterDeployServiceHandler(ctx, gw, conn); err != nil {
 		return nil, err
 	}
 

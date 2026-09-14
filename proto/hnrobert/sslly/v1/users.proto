@@ -75,6 +75,8 @@ enum EPermissionSurface {
   E_PERMISSION_SURFACE_LOGS = 3;
   // users.yaml management.
   E_PERMISSION_SURFACE_USERS = 4;
+  // Static dist uploads (DeployService); resource = the target domain.
+  E_PERMISSION_SURFACE_DEPLOY = 5;
 }
 
 // EPermissionMode enumerates access modes.

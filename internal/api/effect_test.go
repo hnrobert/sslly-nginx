@@ -1,8 +1,12 @@
 package api
 
 import (
+	"archive/zip"
+	"bytes"
+	"encoding/base64"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -297,5 +301,201 @@ func TestTokenFieldHotReloadAuth(t *testing.T) {
 	if !strings.Contains(string(data), "token: live-plaintext") ||
 		strings.Contains(string(data), "converted from token") {
 		t.Fatalf("hot reload must leave token fields untouched:\n%s", data)
+	}
+}
+
+// --- deploy + groups -------------------------------------------------------
+
+// zipBytes builds an in-memory zip with the given name->content files.
+func zipBytes(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, content := range files {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte(content)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func b64json(body string) string { return body }
+
+// TestDeployStaticEndToEnd: upload a dist zip -> files unpacked under the
+// deploy root, a static route appears (group-aware), the generated nginx
+// config serves the domain from the unpacked dir, and redeploy overwrites.
+func TestDeployStaticEndToEnd(t *testing.T) {
+	e := newTestEnv(t)
+	deployRoot := t.TempDir()
+	e.srv.cfg.DeployDir = deployRoot
+
+	zip := zipBytes(t, map[string]string{"index.html": "<h1>hello v1</h1>"})
+	zb64 := base64.StdEncoding.EncodeToString(zip)
+
+	code, body := e.post(t, "/v1/DeployStatic", e.adminToken,
+		`{"domain":"app.example.com","distZip":"`+zb64+`"}`)
+	if code != http.StatusOK || !strings.Contains(body, `"applied":true`) {
+		t.Fatalf("DeployStatic = %d %s", code, body)
+	}
+
+	// Files on disk with the wrapper stripped semantics (flat here).
+	idx := filepath.Join(deployRoot, "app.example.com", "index.html")
+	data, err := os.ReadFile(idx)
+	if err != nil || !strings.Contains(string(data), "hello v1") {
+		t.Fatalf("deployed file missing: %v %q", err, data)
+	}
+
+	// proxy.yaml gained a static route; nginx serves it from the deploy dir.
+	cfg, err := config.Load(e.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for key := range cfg.Ports {
+		if strings.Contains(key, filepath.Join(deployRoot, "app.example.com")) {
+			found = true
+			if got := cfg.Ports[key]; len(got) != 1 || got[0] != "app.example.com" {
+				t.Fatalf("static route listeners wrong: %v", got)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("static route key missing from cfg: %+v", cfg.Ports)
+	}
+	conf := e.generatedNginxConf(t)
+	if !strings.Contains(conf, "server_name app.example.com") {
+		t.Fatalf("domain server block missing:\n%s", conf)
+	}
+
+	// Redeploy (wrapper dir form) overwrites content.
+	zip2 := zipBytes(t, map[string]string{"dist/index.html": "<h1>v2</h1>"})
+	zb642 := base64.StdEncoding.EncodeToString(zip2)
+	code, body = e.post(t, "/v1/DeployStatic", e.adminToken,
+		`{"domain":"app.example.com","distZip":"`+zb642+`"}`)
+	if code != http.StatusOK || !strings.Contains(body, `"applied":true`) {
+		t.Fatalf("redeploy = %d %s", code, body)
+	}
+	data, err = os.ReadFile(idx)
+	if err != nil || !strings.Contains(string(data), "v2") {
+		t.Fatalf("redeploy did not overwrite: %v %q", err, data)
+	}
+	// No leftover temp/old dirs.
+	entries, _ := os.ReadDir(deployRoot)
+	for _, en := range entries {
+		if strings.HasPrefix(en.Name(), ".deploy-tmp-") || strings.HasPrefix(en.Name(), ".deploy-old-") {
+			t.Fatalf("leftover staging dir: %s", en.Name())
+		}
+	}
+
+	// Undeploy: route gone, files gone.
+	code, body = e.post(t, "/v1/DeleteStatic", e.adminToken, `{"domain":"app.example.com"}`)
+	if code != http.StatusOK || !strings.Contains(body, `"applied":true`) {
+		t.Fatalf("DeleteStatic = %d %s", code, body)
+	}
+	if _, err := os.Stat(idx); !os.IsNotExist(err) {
+		t.Fatalf("deployed files not removed")
+	}
+	cfg, err = config.Load(e.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key := range cfg.Ports {
+		if strings.Contains(key, "app.example.com") {
+			t.Fatalf("static route not removed: %s", key)
+		}
+	}
+}
+
+// TestDeployStaticZipSlipRejected: archive entries escaping the destination
+// are refused and nothing is written.
+func TestDeployStaticZipSlipRejected(t *testing.T) {
+	e := newTestEnv(t)
+	deployRoot := t.TempDir()
+	e.srv.cfg.DeployDir = deployRoot
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, _ := zw.Create("../../escaped.txt")
+	_, _ = w.Write([]byte("pwn"))
+	_ = zw.Close()
+
+	zb64 := base64.StdEncoding.EncodeToString(buf.Bytes())
+	code, body := e.post(t, "/v1/DeployStatic", e.adminToken,
+		`{"domain":"app.example.com","distZip":"`+zb64+`"}`)
+	if code != http.StatusBadRequest {
+		t.Fatalf("zip-slip must be rejected, got %d %s", code, body)
+	}
+	if _, err := os.Stat(filepath.Join(deployRoot, "..", "..", "escaped.txt")); !os.IsNotExist(err) {
+		t.Fatalf("file escaped the deploy root")
+	}
+}
+
+// TestProxyGroupEndToEnd: SetProxyEntry with a group lands inside the nested
+// mapping; List expands per-group occurrences; Delete targets (group, key).
+func TestProxyGroupEndToEnd(t *testing.T) {
+	e := newTestEnv(t)
+
+	code, body := e.post(t, "/v1/SetProxyEntry", e.adminToken,
+		`{"entry":{"upstreamKey":"9099","listenerKeys":["grp.example.com"],"group":"web.front"}}`)
+	if code != http.StatusOK || !strings.Contains(body, `"applied":true`) {
+		t.Fatalf("group set = %d %s", code, body)
+	}
+
+	out, _ := os.ReadFile(filepath.Join(e.dir, config.ProxyConfigFile))
+	s := string(out)
+	if !strings.Contains(s, "web:") || !strings.Contains(s, "  front:") || !strings.Contains(s, "grp.example.com") {
+		t.Fatalf("nested group not written:\n%s", s)
+	}
+
+	// List shows the group on the entry.
+	code, body = e.post(t, "/v1/ListProxyEntries", e.adminToken, "{}")
+	if code != http.StatusOK || !strings.Contains(body, `"group":"web.front"`) {
+		t.Fatalf("list missing group: %s", body)
+	}
+
+	// Deleting without the group misses; with it, succeeds.
+	code, _ = e.post(t, "/v1/DeleteProxyEntry", e.adminToken, `{"upstreamKey":"9099"}`)
+	if code != http.StatusNotFound {
+		t.Fatalf("top-level delete should be NotFound, got %d", code)
+	}
+	code, body = e.post(t, "/v1/DeleteProxyEntry", e.adminToken, `{"upstreamKey":"9099","group":"web.front"}`)
+	if code != http.StatusOK || !strings.Contains(body, `"applied":true`) {
+		t.Fatalf("group delete = %d %s", code, body)
+	}
+	out, _ = os.ReadFile(filepath.Join(e.dir, config.ProxyConfigFile))
+	if strings.Contains(string(out), "grp.example.com") {
+		t.Fatalf("group entry not deleted:\n%s", out)
+	}
+}
+
+// TestDeployScopedUser: the deploy surface gates DeployStatic per domain.
+func TestDeployScopedUser(t *testing.T) {
+	e := newTestEnv(t)
+	e.srv.cfg.DeployDir = t.TempDir()
+
+	// admin grants a deploy-only user limited to *.myapps.example.
+	code, _ := e.post(t, "/v1/UpsertUser", e.adminToken,
+		`{"user":{"name":"rel","permissions":[{"surface":"E_PERMISSION_SURFACE_DEPLOY","mode":"E_PERMISSION_MODE_READ_WRITE","domains":["*.myapps.example"]}]},"token":"rel-token"}`)
+	if code != http.StatusOK {
+		t.Fatalf("UpsertUser = %d", code)
+	}
+
+	zb64 := base64.StdEncoding.EncodeToString(zipBytes(t, map[string]string{"index.html": "x"}))
+	code, _ = e.post(t, "/v1/DeployStatic", "rel-token",
+		`{"domain":"app.myapps.example","distZip":"`+zb64+`"}`)
+	if code != http.StatusOK {
+		t.Fatalf("scoped deploy = %d", code)
+	}
+	code, _ = e.post(t, "/v1/DeployStatic", "rel-token",
+		`{"domain":"other.example.net","distZip":"`+zb64+`"}`)
+	if code != http.StatusForbidden {
+		t.Fatalf("out-of-scope deploy = %d, want 403", code)
 	}
 }

@@ -1,0 +1,69 @@
+// Static-site deployment backed by uploaded dist archives.
+syntax = "proto3";
+
+package hnrobert.sslly.v1;
+
+import "google/api/annotations.proto";
+import "hnrobert/sslly/v1/apply.proto";
+
+// DeployService publishes static websites end-to-end: the caller uploads a
+// dist archive (zip) plus a domain, sslly-nginx unpacks it under its deploy
+// root, writes the static-site route into proxy.yaml, and runs the validated
+// reload pipeline. Redeploying the same domain replaces the previous files
+// (simple overwrite — no version history) before the route is switched.
+// Requires the 'deploy' permission surface (resource = the domain).
+service DeployService {
+  // DeployStatic unpacks dist_zip and serves it at the given domain.
+  rpc DeployStatic(DeployStaticRequest) returns (DeployStaticResponse) {
+    option (google.api.http) = {
+      post: "/DeployStatic"
+      body: "*"
+    };
+  }
+
+  // DeleteStatic removes the route and deletes the deployed files.
+  rpc DeleteStatic(DeleteStaticRequest) returns (DeleteStaticResponse) {
+    option (google.api.http) = {
+      post: "/DeleteStatic"
+      body: "*"
+    };
+  }
+}
+
+// DeployStaticRequest carries the archive and its target.
+message DeployStaticRequest {
+  // Domain to serve the dist at (optionally with a /path prefix).
+  string domain = 1;
+  // Zip archive of the dist output. The archive root becomes the site root;
+  // a single wrapping top-level directory is stripped automatically.
+  bytes dist_zip = 2;
+  // Optional proxy.yaml group ("a.b"; empty = top level) for the generated
+  // static route entry.
+  string group = 3;
+}
+
+// DeployStaticResponse reports the generated route and apply outcome.
+message DeployStaticResponse {
+  // The static-site upstream key that now serves the domain (the deploy
+  // directory path), as written into proxy.yaml.
+  string static_key = 1;
+  // Reload pipeline outcome for this change. On failure the proxy.yaml
+  // change is rolled back; the unpacked files remain (next deploy
+  // overwrites them).
+  CMsgApplyResult apply = 2;
+}
+
+// DeleteStaticRequest names a previous deployment.
+message DeleteStaticRequest {
+  // Domain the dist was deployed to.
+  string domain = 1;
+  // Group the generated route entry lives in ("a.b"; empty = top level) —
+  // must match the DeployStatic call that created it.
+  string group = 2;
+}
+
+// DeleteStaticResponse reports the apply outcome.
+message DeleteStaticResponse {
+  // Reload pipeline outcome for this change.
+  CMsgApplyResult apply = 1;
+}

@@ -34,6 +34,9 @@ message SetProxyEntryResponse {
 message DeleteProxyEntryRequest {
   // Exact upstream key as written in proxy.yaml.
   string upstream_key = 1;
+  // Group the entry lives in ("a.b"; empty = top level). The same key may
+  // exist in several groups — this selects which occurrence to delete.
+  string group = 2;
 }
 
 // DeleteProxyEntryResponse reports the apply outcome.
@@ -72,6 +75,9 @@ message CMsgProxyEntry {
   // Listener keys routed to the upstream, e.g. "example.com",
   // "example.com/api", "example.com|8443".
   repeated string listener_keys = 2;
+  // Group the entry lives in ("a.b" dotted path; empty = top level).
+  // Purely organizational: groups flatten away at generation time.
+  string group = 3;
 }
 
 // ProxyService manages proxy.yaml: upstream entries (port -> listeners) and

@@ -21,6 +21,8 @@ users:
         mode: read-write
       - surface: users
         mode: read-write
+      - surface: deploy
+        mode: read-write
 
   # Example limited operator: full CORS control under *.ibuduan.com, read-only
   # proxy visibility, and management of port 8080 routes only.
@@ -48,3 +50,15 @@ users:
   #       mode: read-write
   #     - surface: users
   #       mode: read
+
+  # Example release engineer: may deploy static sites to *.myapps.example.com
+  # and edit every route inside the "web" proxy.yaml group.
+  # - name: rel
+  #   token_hash: <sha256 hex>
+  #   permissions:
+  #     - surface: deploy
+  #       mode: read-write
+  #       domains: ["*.myapps.example"]
+  #     - surface: proxy
+  #       mode: read-write
+  #       upstreams: ["web/*"]

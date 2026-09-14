@@ -116,3 +116,39 @@ func TestDomainOfListener(t *testing.T) {
 		}
 	}
 }
+
+func TestAuthorizeGroupSelectors(t *testing.T) {
+	res := func(group, key string) Resource {
+		return Resource{Domain: "x.example.com", UpstreamKey: key, Group: group}
+	}
+	mk := func(selectors ...string) *config.User {
+		return &config.User{Name: "u", Permissions: []config.Permission{
+			perm(config.SurfaceProxy, config.ModeReadWrite, nil, selectors),
+		}}
+	}
+
+	cases := []struct {
+		name      string
+		selectors []string
+		resource  Resource
+		want      codes.Code
+	}{
+		{"group wildcard covers group", []string{"class1/*"}, res("class1", "8080"), codes.OK},
+		{"group wildcard covers nested group only exactly", []string{"class1/*"}, res("class1.sub", "8080"), codes.PermissionDenied},
+		{"group key exact", []string{"class1/8080"}, res("class1", "8080"), codes.OK},
+		{"group key wrong key", []string{"class1/8080"}, res("class1", "9090"), codes.PermissionDenied},
+		{"group key wrong group", []string{"class1/8080"}, res("other", "8080"), codes.PermissionDenied},
+		{"group key does not cover top level", []string{"class1/8080"}, res("", "8080"), codes.PermissionDenied},
+		{"bare key covers grouped entry", []string{"8080"}, res("class1", "8080"), codes.OK},
+		{"bare path key not mistaken for selector", []string{"192.168.50.2:5678/api"}, res("", "192.168.50.2:5678/api"), codes.OK},
+		{"group wildcard does not cover top level", []string{"class1/*"}, res("", "8080"), codes.PermissionDenied},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := Authorize(mk(tc.selectors...), config.SurfaceProxy, config.ModeReadWrite, []Resource{tc.resource})
+			if status.Code(err) != tc.want {
+				t.Fatalf("Authorize = %v, want %v", err, tc.want)
+			}
+		})
+	}
+}

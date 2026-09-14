@@ -178,15 +178,20 @@ func seqChild(root *yaml.Node, key string) *yaml.Node {
 // --- proxy.yaml ----------------------------------------------------------
 
 // SetProxyEntry creates or replaces one upstream entry (full replace of its
-// listener list). New keys are appended at the end, keeping OrderedPorts
-// stable and deterministic, exactly like a human appending an entry.
-func (e *Editor) SetProxyEntry(upstreamKey string, listenerKeys []string) (prev []byte, err error) {
+// listener list) inside GROUP ("a.b" dotted path; empty = top level). Groups
+// are created on demand as nested mappings; new keys are appended at the end
+// of their containing mapping, keeping the flattened order deterministic.
+func (e *Editor) SetProxyEntry(group, upstreamKey string, listenerKeys []string) (prev []byte, err error) {
 	if upstreamKey == "" {
 		return nil, errors.New("upstream key must not be empty")
 	}
 	if len(listenerKeys) == 0 {
 		return nil, fmt.Errorf("entry %q needs at least one listener key", upstreamKey)
 	}
+	segs, err := SplitGroupPath(group)
+	if err != nil {
+		return nil, err
+	}
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -195,15 +200,23 @@ func (e *Editor) SetProxyEntry(upstreamKey string, listenerKeys []string) (prev 
 	if err != nil {
 		return nil, err
 	}
-	setSeqValue(root, upstreamKey, listenerKeys)
+	target := descendGroup(root, segs)
+	setSeqValue(target, upstreamKey, listenerKeys)
 	if err := WriteYAMLNodeFileAtomic(e.path(proxyConfigFile), doc); err != nil {
 		return nil, err
 	}
 	return prev, nil
 }
 
-// DeleteProxyEntry removes an upstream entry. ErrEntryNotFound when absent.
-func (e *Editor) DeleteProxyEntry(upstreamKey string) (prev []byte, err error) {
+// DeleteProxyEntry removes an upstream entry from GROUP (empty = top level).
+// Empty group mappings left behind are pruned (including intermediate
+// levels). ErrEntryNotFound when the (group, key) pair is absent.
+func (e *Editor) DeleteProxyEntry(group, upstreamKey string) (prev []byte, err error) {
+	segs, err := SplitGroupPath(group)
+	if err != nil {
+		return nil, err
+	}
+
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -211,15 +224,56 @@ func (e *Editor) DeleteProxyEntry(upstreamKey string) (prev []byte, err error) {
 	if err != nil {
 		return nil, err
 	}
-	i, _, _ := findEntry(root, upstreamKey)
+
+	// Walk the group chain, remembering the chain of (parent, key-index)
+	// so empty mappings can be pruned bottom-up after the deletion.
+	type hop struct {
+		parent *yaml.Node
+		idx    int
+	}
+	var chain []hop
+	node := root
+	for _, seg := range segs {
+		i, _, v := findEntry(node, seg)
+		if i < 0 || v == nil || v.Kind != yaml.MappingNode {
+			return nil, fmt.Errorf("%w: group %q", ErrEntryNotFound, group)
+		}
+		chain = append(chain, hop{parent: node, idx: i})
+		node = v
+	}
+
+	i, _, _ := findEntry(node, upstreamKey)
 	if i < 0 {
 		return nil, fmt.Errorf("%w: %s", ErrEntryNotFound, upstreamKey)
 	}
-	root.Content = append(root.Content[:i], root.Content[i+2:]...)
+	node.Content = append(node.Content[:i], node.Content[i+2:]...)
+
+	// Prune empty groups bottom-up (never the root itself).
+	for lvl := len(chain) - 1; lvl >= 0; lvl-- {
+		h := chain[lvl]
+		child := h.parent.Content[h.idx+1]
+		if child.Kind == yaml.MappingNode && len(child.Content) == 0 {
+			h.parent.Content = append(h.parent.Content[:h.idx], h.parent.Content[h.idx+2:]...)
+		} else {
+			break // still has content (or is a route): nothing above can be empty
+		}
+	}
+
 	if err := WriteYAMLNodeFileAtomic(e.path(proxyConfigFile), doc); err != nil {
 		return nil, err
 	}
 	return prev, nil
+}
+
+// descendGroup walks (creating on demand) the nested group mappings named by
+// segs under root and returns the innermost mapping. Dotted flat keys are
+// NOT created by the editor — canonical writes use nested form only.
+func descendGroup(root *yaml.Node, segs []string) *yaml.Node {
+	node := root
+	for _, seg := range segs {
+		node = mappingChild(node, seg)
+	}
+	return node
 }
 
 // SetNoTrailingSlash fully replaces the no_trailing_slash list.

@@ -24,14 +24,22 @@ func (p *proxyService) ListProxyEntries(ctx context.Context, _ *v1.ListProxyEntr
 
 	resp := &v1.ListProxyEntriesResponse{}
 	for _, key := range cfg.OrderedPorts { // declaration order
-		listeners := cfg.Ports[key]
-		if !CanSee(user, config.SurfaceProxy, entryResources(key, listeners)) {
-			continue
+		groups := cfg.EntryGroups[key]
+		if len(groups) == 0 {
+			groups = []string{""} // top-level occurrence
 		}
-		resp.Entries = append(resp.Entries, &v1.CMsgProxyEntry{
-			UpstreamKey:  key,
-			ListenerKeys: listeners,
-		})
+		for _, group := range groups {
+			// A logical (group, key) entry: for a cross-group key each group
+			// lists the merged listener set (route semantics are identical).
+			if !CanSee(user, config.SurfaceProxy, entryResources(group, key, cfg.Ports[key])) {
+				continue
+			}
+			resp.Entries = append(resp.Entries, &v1.CMsgProxyEntry{
+				UpstreamKey:  key,
+				ListenerKeys: cfg.Ports[key],
+				Group:        group,
+			})
+		}
 	}
 	return resp, nil
 }
@@ -58,11 +66,11 @@ func (p *proxyService) SetProxyEntry(ctx context.Context, req *v1.SetProxyEntryR
 	// Authorize the complete NEW state (not the delta) so a scoped user can
 	// never widen an entry beyond their grant.
 	if err := Authorize(userFromContext(ctx), config.SurfaceProxy, config.ModeReadWrite,
-		entryResources(entry.GetUpstreamKey(), entry.GetListenerKeys())); err != nil {
+		entryResources(entry.GetGroup(), entry.GetUpstreamKey(), entry.GetListenerKeys())); err != nil {
 		return nil, err
 	}
 
-	prev, err := p.srv.cfg.Editor.SetProxyEntry(entry.GetUpstreamKey(), entry.GetListenerKeys())
+	prev, err := p.srv.cfg.Editor.SetProxyEntry(entry.GetGroup(), entry.GetUpstreamKey(), entry.GetListenerKeys())
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "write proxy.yaml: %v", err)
 	}
@@ -88,11 +96,11 @@ func (p *proxyService) DeleteProxyEntry(ctx context.Context, req *v1.DeleteProxy
 		return nil, status.Errorf(codes.NotFound, "upstream key %q not found", req.GetUpstreamKey())
 	}
 	if err := Authorize(userFromContext(ctx), config.SurfaceProxy, config.ModeReadWrite,
-		entryResources(req.GetUpstreamKey(), listeners)); err != nil {
+		entryResources(req.GetGroup(), req.GetUpstreamKey(), listeners)); err != nil {
 		return nil, err
 	}
 
-	prev, err := p.srv.cfg.Editor.DeleteProxyEntry(req.GetUpstreamKey())
+	prev, err := p.srv.cfg.Editor.DeleteProxyEntry(req.GetGroup(), req.GetUpstreamKey())
 	if err != nil {
 		if errors.Is(err, config.ErrEntryNotFound) {
 			return nil, status.Errorf(codes.NotFound, "upstream key %q not found", req.GetUpstreamKey())

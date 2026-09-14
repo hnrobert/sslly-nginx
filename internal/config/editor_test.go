@@ -24,6 +24,22 @@ func copyFixture(t *testing.T, dir, srcName, dstName string) {
 	}
 }
 
+// routeKeys returns the flattened ROUTE keys in file order (groups descended
+// into), matching what Load's OrderedPorts records for proxy.yaml.
+func routeKeys(t *testing.T, path string) []string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &Config{}
+	if err := parseProxyDoc(data, cfg); err != nil {
+		t.Fatal(err)
+	}
+	return cfg.OrderedPorts
+}
+
+// topLevelKeys returns the literal top-level keys of any YAML doc.
 func topLevelKeys(t *testing.T, path string) []string {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -42,7 +58,7 @@ func TestEditorProxyReplacePreservesComments(t *testing.T) {
 	copyFixture(t, dir, proxyExampleFile, proxyConfigFile)
 	ed := NewEditor(dir)
 
-	if _, err := ed.SetProxyEntry("1234", []string{"new.example.com", "alt.example.com"}); err != nil {
+	if _, err := ed.SetProxyEntry("", "1234", []string{"new.example.com", "alt.example.com"}); err != nil {
 		t.Fatalf("SetProxyEntry: %v", err)
 	}
 
@@ -81,29 +97,29 @@ func TestEditorProxyAppendKeepsOrder(t *testing.T) {
 	copyFixture(t, dir, proxyExampleFile, proxyConfigFile)
 	ed := NewEditor(dir)
 
-	if _, err := ed.SetProxyEntry("9099", []string{"nine.example.com"}); err != nil {
+	if _, err := ed.SetProxyEntry("", "9099", []string{"nine.example.com"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ed.SetProxyEntry("4555", []string{"four.example.com"}); err != nil {
+	if _, err := ed.SetProxyEntry("", "4555", []string{"four.example.com"}); err != nil {
 		t.Fatal(err)
 	}
 
-	keys := topLevelKeys(t, filepath.Join(dir, proxyConfigFile))
+	keys := routeKeys(t, filepath.Join(dir, proxyConfigFile))
 	want := []string{"1234", "9099", "4555"} // special keys absent; new keys appended in order
 	if strings.Join(keys, ",") != strings.Join(want, ",") {
 		t.Fatalf("key order = %v, want %v", keys, want)
 	}
 
 	// Deleting the middle entry leaves the others in place.
-	if _, err := ed.DeleteProxyEntry("9099"); err != nil {
+	if _, err := ed.DeleteProxyEntry("", "9099"); err != nil {
 		t.Fatal(err)
 	}
-	keys = topLevelKeys(t, filepath.Join(dir, proxyConfigFile))
+	keys = routeKeys(t, filepath.Join(dir, proxyConfigFile))
 	if strings.Join(keys, ",") != "1234,4555" {
 		t.Fatalf("key order after delete = %v", keys)
 	}
 
-	if _, err := ed.DeleteProxyEntry("9099"); !errors.Is(err, ErrEntryNotFound) {
+	if _, err := ed.DeleteProxyEntry("", "9099"); !errors.Is(err, ErrEntryNotFound) {
 		t.Fatalf("expected ErrEntryNotFound, got %v", err)
 	}
 }
@@ -378,7 +394,7 @@ func TestEditorRestoreFile(t *testing.T) {
 	copyFixture(t, dir, proxyExampleFile, proxyConfigFile)
 	ed := NewEditor(dir)
 
-	prev, err := ed.SetProxyEntry("1234", []string{"changed.example.com"})
+	prev, err := ed.SetProxyEntry("", "1234", []string{"changed.example.com"})
 	if err != nil {
 		t.Fatal(err)
 	}

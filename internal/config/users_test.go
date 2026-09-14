@@ -28,8 +28,8 @@ func TestEnsureUsersFileBootstrapFromEnv(t *testing.T) {
 	if u.Name != "admin" {
 		t.Fatalf("expected admin, got %q", u.Name)
 	}
-	if len(u.Permissions) != 4 {
-		t.Fatalf("expected bootstrap admin with 4 surfaces, got %d", len(u.Permissions))
+	if len(u.Permissions) != 5 {
+		t.Fatalf("expected bootstrap admin with 5 surfaces, got %d", len(u.Permissions))
 	}
 
 	// Second call is a no-op when the file exists.
