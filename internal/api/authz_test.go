@@ -134,8 +134,9 @@ func TestAuthorizeGroupSelectors(t *testing.T) {
 		want      codes.Code
 	}{
 		{"group wildcard covers group", []string{"class1/*"}, res("class1", "8080"), codes.OK},
-		{"group wildcard covers nested group only exactly", []string{"class1/*"}, res("class1.sub", "8080"), codes.PermissionDenied},
+		{"group wildcard covers subgroups", []string{"class1/*"}, res("class1.sub", "8080"), codes.OK},
 		{"group key exact", []string{"class1/8080"}, res("class1", "8080"), codes.OK},
+		{"group key covers subgroup entry", []string{"class1/8080"}, res("class1.deep", "8080"), codes.OK},
 		{"group key wrong key", []string{"class1/8080"}, res("class1", "9090"), codes.PermissionDenied},
 		{"group key wrong group", []string{"class1/8080"}, res("other", "8080"), codes.PermissionDenied},
 		{"group key does not cover top level", []string{"class1/8080"}, res("", "8080"), codes.PermissionDenied},

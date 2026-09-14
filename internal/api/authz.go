@@ -123,8 +123,12 @@ func allCovered(p *config.Permission, resources []Resource) bool {
 //     and grouped entries alike); matches verbatim, including keys that
 //     themselves contain "/" (path-routed upstreams like "host:port/api");
 //   - "class1/8080"                — an entry with upstream key 8080 inside
-//     exactly group class1;
-//   - "class1/*"                   — every entry inside group class1.
+//     group class1 or any of its subgroups;
+//   - "class1/*"                   — every entry inside group class1 or any
+//     of its subgroups (class1.front, class1.a.b, ...).
+//
+// Group matching is PREFIX-based: a selector covers the group itself and
+// everything nested under it. It never covers top-level entries.
 func upstreamCovered(selectors []string, res Resource) bool {
 	if len(selectors) == 0 || contains(selectors, "*") {
 		return true
@@ -140,7 +144,7 @@ func upstreamCovered(selectors []string, res Resource) bool {
 			continue // not a group/key or group/* form
 		}
 		group, tail := sel[:slash], sel[slash+1:]
-		if group != res.Group {
+		if res.Group != group && !strings.HasPrefix(res.Group, group+".") {
 			continue
 		}
 		if tail == "*" || tail == res.UpstreamKey {

@@ -204,7 +204,8 @@ Requires the `deploy` surface (resource = the target domain).
 `group` field (`"a.b"` dotted path; empty = top level); the same upstream
 key may exist in several groups (List shows one entry per group). Permission
 `upstreams` selectors accept `group/key` and `group/*` forms alongside bare
-keys (bare keys match any group):
+keys (bare keys match any group; group selectors cover the group **and its
+subgroups**, never top-level entries):
 
 ```yaml
 - surface: proxy
