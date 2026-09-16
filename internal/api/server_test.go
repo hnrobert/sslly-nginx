@@ -22,7 +22,9 @@ import (
 )
 
 // testEnv is a fully wired control plane over a temp configs dir, served
-// through a bufconn gRPC link and an httptest gateway façade.
+// through a bufconn gRPC link and an httptest gateway façade. adminToken /
+// opsToken are SESSION tokens (obtained via Authenticate in newTestEnv),
+// matching the two-step auth model.
 type testEnv struct {
 	dir        string
 	ts         *httptest.Server
@@ -30,8 +32,8 @@ type testEnv struct {
 	reloadMu   sync.Mutex
 	reloadErr  error
 	reloadN    int
-	adminToken string
-	opsToken   string
+	adminToken string // session token for admin / admin-token
+	opsToken   string // session token for ops / ops-token
 }
 
 func (e *testEnv) reload() error {
@@ -124,7 +126,38 @@ func newTestEnv(t *testing.T) *testEnv {
 		t.Fatal(err)
 	}
 	e.ts = httptest.NewServer(handler)
+
+	// Exchange the long-lived credentials for sessions (the two-step model).
+	e.adminToken = e.login(t, "admin", "admin-token")
+	e.opsToken = e.login(t, "ops", "ops-token")
 	return e
+}
+
+// login authenticates (name, long-lived-token) and returns the session token.
+func (e *testEnv) login(t *testing.T, name, token string) string {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, e.ts.URL+"/v1/Authenticate",
+		strings.NewReader(`{"name":"`+name+`","token":"`+token+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := e.ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("login %s = %d %s", name, resp.StatusCode, b)
+	}
+	var parsed struct {
+		SessionToken string `json:"sessionToken"`
+	}
+	if err := json.Unmarshal(b, &parsed); err != nil || parsed.SessionToken == "" {
+		t.Fatalf("login %s response: %s", name, b)
+	}
+	return parsed.SessionToken
 }
 
 // post sends a JSON POST with the given bearer token; returns status and body.
@@ -335,10 +368,10 @@ func TestGatewayUsersCRUDAndGuards(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("upsert auditor = %d %s", code, body)
 	}
-	// The new token authenticates immediately (mtime cache).
-	code, _ = e.post(t, "/v1/ListProxyEntries", "auditor-token", "{}")
+	// The new credentials authenticate immediately (mtime cache + session issue).
+	code, _ = e.post(t, "/v1/ListProxyEntries", e.login(t, "auditor", "auditor-token"), "{}")
 	if code != http.StatusOK {
-		t.Fatalf("auditor token should work, got %d", code)
+		t.Fatalf("auditor session should work, got %d", code)
 	}
 
 	// Listing shows users but never token hashes.
@@ -489,21 +522,37 @@ func TestServerStartStopLifecycle(t *testing.T) {
 		t.Fatalf("healthz: %v", err)
 	}
 	resp.Body.Close()
+	var body []byte
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("healthz = %d", resp.StatusCode)
 	}
 
-	// Authenticated mutation over the real stack, including the loopback
-	// gateway->gRPC hop.
-	req, _ := http.NewRequest(http.MethodPost, base+"/v1/SetProxyEntry",
-		strings.NewReader(`{"entry":{"upstreamKey":"7070","listenerKeys":["life.example.com"]}}`))
-	req.Header.Set("Authorization", "Bearer admin-token")
+	// Authenticate over the real stack (loopback gateway->gRPC hop), then
+	// mutate with the session token.
+	req, _ := http.NewRequest(http.MethodPost, base+"/v1/Authenticate",
+		strings.NewReader(`{"name":"admin","token":"admin-token"}`))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	var auth struct {
+		SessionToken string `json:"sessionToken"`
+	}
+	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &auth) != nil || auth.SessionToken == "" {
+		t.Fatalf("authenticate = %d %s", resp.StatusCode, body)
+	}
+	req, _ = http.NewRequest(http.MethodPost, base+"/v1/SetProxyEntry",
+		strings.NewReader(`{"entry":{"upstreamKey":"7070","listenerKeys":["life.example.com"]}}`))
+	req.Header.Set("Authorization", "Bearer "+auth.SessionToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"applied":true`) {
 		t.Fatalf("set over real listeners = %d %s", resp.StatusCode, body)
@@ -573,5 +622,95 @@ func TestServerHTTPOnlyUsesInternalGRPC(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("healthz = %d", resp.StatusCode)
+	}
+}
+
+// --- two-step auth model ----------------------------------------------------
+
+// TestAuthModelLongLivedTokenRejected: the users.yaml token must NOT work as
+// a bearer for anything except Authenticate.
+func TestAuthModelLongLivedTokenRejected(t *testing.T) {
+	e := newTestEnv(t)
+	code, _ := e.post(t, "/v1/ListProxyEntries", "admin-token", "{}")
+	if code != http.StatusUnauthorized {
+		t.Fatalf("long-lived token as bearer = %d, want 401", code)
+	}
+}
+
+// TestAuthModelLifecycle: exchange -> use -> logout -> dead; wrong name and
+// wrong token both 401 identically.
+func TestAuthModelLifecycle(t *testing.T) {
+	e := newTestEnv(t)
+
+	// Wrong name / wrong token -> identical 401 (no enumeration oracle).
+	for _, body := range []string{
+		`{"name":"nosuch","token":"admin-token"}`,
+		`{"name":"admin","token":"wrong"}`,
+		`{}`,
+	} {
+		code, _ := e.post(t, "/v1/Authenticate", "", body)
+		if code != http.StatusUnauthorized && code != http.StatusBadRequest {
+			t.Fatalf("authenticate %s = %d, want 401/400", body, code)
+		}
+	}
+
+	// Fresh session works, then Logout kills it.
+	sess := e.login(t, "ops", "ops-token")
+	code, _ := e.post(t, "/v1/ListCorsRules", sess, "{}")
+	if code != http.StatusOK {
+		t.Fatalf("session use = %d", code)
+	}
+	code, _ = e.post(t, "/v1/Logout", sess, "{}")
+	if code != http.StatusOK {
+		t.Fatalf("logout = %d", code)
+	}
+	code, _ = e.post(t, "/v1/ListCorsRules", sess, "{}")
+	if code != http.StatusUnauthorized {
+		t.Fatalf("session after logout = %d, want 401", code)
+	}
+}
+
+// TestAuthModelCredentialRotationKillsSessions: rotating a user's long-lived
+// token invalidates every session issued under the old credential.
+func TestAuthModelCredentialRotationKillsSessions(t *testing.T) {
+	e := newTestEnv(t)
+	sess := e.login(t, "ops", "ops-token")
+	code, _ := e.post(t, "/v1/ListCorsRules", sess, "{}")
+	if code != http.StatusOK {
+		t.Fatalf("pre-rotation session = %d", code)
+	}
+
+	// admin rotates ops's token.
+	code, _ = e.post(t, "/v1/UpsertUser", e.adminToken,
+		`{"user":{"name":"ops","permissions":[{"surface":"E_PERMISSION_SURFACE_CORS","mode":"E_PERMISSION_MODE_READ_WRITE","domains":["*.ibuduan.com"]},{"surface":"E_PERMISSION_SURFACE_PROXY","mode":"E_PERMISSION_MODE_READ"}]},"token":"ops-new-token"}`)
+	if code != http.StatusOK {
+		t.Fatalf("rotate = %d", code)
+	}
+
+	code, _ = e.post(t, "/v1/ListCorsRules", sess, "{}")
+	if code != http.StatusUnauthorized {
+		t.Fatalf("stale session after rotation = %d, want 401", code)
+	}
+	// New credential exchanges fine.
+	if code, _ := e.post(t, "/v1/ListCorsRules", e.login(t, "ops", "ops-new-token"), "{}"); code != http.StatusOK {
+		t.Fatalf("new credential session = %d", code)
+	}
+}
+
+// TestAuthModelSessionExpiry: a session past its TTL is rejected.
+func TestAuthModelSessionExpiry(t *testing.T) {
+	e := newTestEnv(t)
+	sess := e.login(t, "ops", "ops-token")
+
+	// Expire it artificially.
+	e.srv.sessions.mu.Lock()
+	for _, s := range e.srv.sessions.sessions {
+		s.expiresAt = time.Now().Add(-time.Second)
+	}
+	e.srv.sessions.mu.Unlock()
+
+	code, _ := e.post(t, "/v1/ListCorsRules", sess, "{}")
+	if code != http.StatusUnauthorized {
+		t.Fatalf("expired session = %d, want 401", code)
 	}
 }

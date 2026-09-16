@@ -367,7 +367,9 @@ no_trailing_slash:
 | `SSLLY_DEFAULT_HTTPS_LISTEN_PORT` | 443 | Default HTTPS listen port |
 | `SSLLY_API_HTTP_ADDR` | `:9080` | Control API HTTP/JSON gateway listen address |
 | `SSLLY_API_GRPC_ADDR` | `:9081` | Control API native gRPC listen address |
-| `SSLLY_API_ADMIN_TOKEN` | — | Bootstrap admin token, hashed into `users.yaml` on first boot |
+| `SSLY_API_ADMIN_TOKEN` | — | Bootstrap admin token, hashed into `users.yaml` on first boot |
+| `SSLLY_API_SESSION_TTL` | `12h` | Control-API session lifetime (Go duration, e.g. `30m` / `24h`) |
+| `SSLLY_DEPLOY_DIR` | `./static/deploy` | Root directory for API-deployed static sites |
 
 **Legacy Variables (deprecated):**
 

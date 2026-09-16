@@ -191,6 +191,7 @@ func (a *App) Start() error {
 			Editor:      a.editor,
 			CertDomains: a.certDomainSet,
 			DeployDir:   os.Getenv("SSLLY_DEPLOY_DIR"),
+			SessionTTL:  sessionTTLFromEnv(),
 		})
 		if err := apiSrv.Start(); err != nil {
 			return fmt.Errorf("failed to start control API: %w", err)
@@ -232,4 +233,16 @@ func (a *App) Stop() {
 	}
 	a.reloadDebounceMu.Unlock()
 	a.nginxManager.Stop()
+}
+
+// sessionTTLFromEnv parses SSLLY_API_SESSION_TTL as a Go duration
+// (e.g. "30m", "12h"); empty or invalid falls back to 12h.
+func sessionTTLFromEnv() time.Duration {
+	if v := os.Getenv("SSLLY_API_SESSION_TTL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+		logger.Warn("invalid SSLLY_API_SESSION_TTL %q, using default 12h", v)
+	}
+	return 0 // api package default
 }

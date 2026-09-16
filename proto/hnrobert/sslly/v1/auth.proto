@@ -1,0 +1,55 @@
+// Two-step authentication: exchange long-lived credentials for a session.
+syntax = "proto3";
+
+package hnrobert.sslly.v1;
+
+import "google/api/annotations.proto";
+
+// AuthService implements the two-step auth model: clients authenticate ONCE
+// with their users.yaml credentials (username + token) and receive a
+// short-lived bearer token; every other RPC must carry that session token.
+// The long-lived token is never a valid bearer for anything else, and a
+// session dies when its underlying credential changes (user deleted, token
+// rotated) or when it expires / is logged out.
+service AuthService {
+  // Authenticate exchanges (name, token) for a session bearer token.
+  rpc Authenticate(AuthenticateRequest) returns (AuthenticateResponse) {
+    option (google.api.http) = {
+      post: "/Authenticate"
+      body: "*"
+    };
+  }
+
+  // Logout revokes the session that the request itself authenticated with.
+  rpc Logout(LogoutRequest) returns (LogoutResponse) {
+    option (google.api.http) = {
+      post: "/Logout"
+      body: "*"
+    };
+  }
+}
+
+// AuthenticateRequest carries the long-lived credentials.
+message AuthenticateRequest {
+  // User name as written in users.yaml.
+  string name = 1;
+  // The user's long-lived token (the plaintext behind token_hash / the
+  // token field).
+  string token = 2;
+}
+
+// AuthenticateResponse hands back the session token.
+message AuthenticateResponse {
+  // Opaque session token to send as `Authorization: Bearer <token>` on
+  // every subsequent call.
+  string session_token = 1;
+  // Unix seconds after which the session expires.
+  int64 expires_at = 2;
+}
+
+// LogoutRequest is empty — the session is identified by the bearer token
+// of the request itself.
+message LogoutRequest {}
+
+// LogoutResponse is empty.
+message LogoutResponse {}

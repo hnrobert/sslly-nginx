@@ -36,17 +36,36 @@ and hosts generated SDKs for Go, TypeScript, Python, and .NET — other
 projects install a package and call the API, no protoc needed. Quickstarts
 for every language: [SDK.md](SDK.md).
 
-## Authentication
+## Authentication (two-step)
 
-Every call needs a bearer token:
+Every user has a **long-lived credential** (name + token, stored in
+`configs/users.yaml`) and calls the API with a **short-lived session token**:
 
 ```bash
+# 1. exchange (name, token) for a session
+SESSION=$(curl -s -X POST localhost:9080/v1/Authenticate \
+   -H "Content-Type: application/json" \
+   -d '{"name":"admin","token":"<long-lived-token>"}' | jq -r .sessionToken)
+
+# 2. use the session for everything else
 curl -s -X POST localhost:9080/v1/ListProxyEntries \
-   -H "Authorization: Bearer <token>"
+   -H "Authorization: Bearer $SESSION"
 ```
 
-Tokens are SHA-256-hashed in `configs/users.yaml` (never stored in
-plaintext). On first boot sslly-nginx creates an `admin` user with full
+Session rules:
+
+- Opaque, memory-only tokens; TTL 12h by default (`SSLLY_API_SESSION_TTL`,
+  e.g. `"30m"` / `"24h"`). Restarting the service clears all sessions.
+- The long-lived token works for **Authenticate only** — it is rejected as a
+  bearer everywhere else.
+- Rotating a user's long-lived token (or deleting the user) instantly kills
+  every session issued under the old credential; permissions are re-read
+  from users.yaml on each request, so permission edits still apply
+  immediately.
+- `Logout` revokes the session the request itself carries.
+
+Long-lived tokens are SHA-256-hashed in `configs/users.yaml` (never stored
+in plaintext). On first boot sslly-nginx creates an `admin` user with full
 access: the token comes from `SSLLY_API_ADMIN_TOKEN` if set, otherwise a
 random 24-byte token is generated and printed to the log **exactly once**.
 Generate hashes for new tokens with:
@@ -135,6 +154,9 @@ with the YAML rolled back.
 | ------------       | ------------------       | --------------------------------------------- |
 | DeployStatic       | `/v1/DeployStatic`       | `{"domain": "app.x.com", "distZip": "<b64>"}` |
 | DeleteStatic       | `/v1/DeleteStatic`       | `{"domain": "app.x.com", "group": ""}`        |
+| RPC                | Path                     | Body                                          |
+| Authenticate       | `/v1/Authenticate`       | `{"name": "admin", "token": "..."}`           |
+| Logout             | `/v1/Logout`             | `{}`                                          |
 
 The same names work over native gRPC (`hnrobert.sslly.v1.ProxyService.ListProxyEntries` etc.).
 

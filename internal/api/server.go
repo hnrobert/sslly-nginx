@@ -21,6 +21,7 @@ import (
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
+	"time"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 )
@@ -63,6 +64,7 @@ type Config struct {
 	Editor      *config.Editor
 	CertDomains func() map[string]bool
 	DeployDir   string
+	SessionTTL  time.Duration
 	Dial        func(ctx context.Context, target string) (*grpc.ClientConn, error)
 }
 
@@ -75,6 +77,7 @@ type Server struct {
 	httpServer *http.Server
 	httpLis    net.Listener
 	grpcAddr   string
+	sessions   *sessionStore
 }
 
 // New builds the gRPC server (interceptors + services + health + reflection).
@@ -93,16 +96,18 @@ func New(cfg Config) *Server {
 		s.cfg = cfg
 	}
 
+	s.sessions = newSessionStore(cfg.Users, cfg.SessionTTL)
 	s.grpcServer = grpc.NewServer(grpc.ChainUnaryInterceptor(
 		recoveryInterceptor,
 		auditInterceptor(cfg.Users),
-		authInterceptor(cfg.Users),
+		authInterceptor(cfg.Users, s.sessions),
 	))
 	v1.RegisterProxyServiceServer(s.grpcServer, &proxyService{srv: s})
 	v1.RegisterCorsServiceServer(s.grpcServer, &corsService{srv: s})
 	v1.RegisterLogsServiceServer(s.grpcServer, &logsService{srv: s})
 	v1.RegisterUsersServiceServer(s.grpcServer, &usersService{srv: s})
 	v1.RegisterDeployServiceServer(s.grpcServer, &deployService{srv: s})
+	v1.RegisterAuthServiceServer(s.grpcServer, &authService{srv: s})
 	healthpb.RegisterHealthServer(s.grpcServer, health.NewServer())
 	reflection.Register(s.grpcServer)
 	return s
@@ -197,6 +202,9 @@ func (s *Server) gatewayHandler(ctx context.Context, conn *grpc.ClientConn) (htt
 		return nil, err
 	}
 	if err := v1.RegisterDeployServiceHandler(ctx, gw, conn); err != nil {
+		return nil, err
+	}
+	if err := v1.RegisterAuthServiceHandler(ctx, gw, conn); err != nil {
 		return nil, err
 	}
 

@@ -242,3 +242,68 @@ func EnsureUsersFile(configDir, adminToken string) (randomToken string, err erro
 func UsersFilePath(configDir string) string {
 	return filepath.Join(configDir, usersConfigFile)
 }
+
+// VerifyCredentials authenticates a named user with their long-lived token.
+// Unlike VerifyToken (which resolves any matching token), this requires the
+// name to match too — the two-step auth model exchanges (name, token) for a
+// session. Same failure mode for unknown user and wrong token.
+func (s *UserStore) VerifyCredentials(name, token string) (*User, error) {
+	users, err := s.Users()
+	if err != nil {
+		return nil, err
+	}
+	sum := sha256.Sum256([]byte(token))
+	for i := range users {
+		u := &users[i]
+		if u.Name != name {
+			continue
+		}
+		if u.Token != "" {
+			pw := sha256.Sum256([]byte(u.Token))
+			if subtle.ConstantTimeCompare(pw[:], sum[:]) == 1 {
+				return u, nil
+			}
+			return nil, ErrUnknownToken
+		}
+		stored, derr := hex.DecodeString(u.TokenHash)
+		if derr != nil || len(stored) != sha256.Size {
+			return nil, ErrUnknownToken
+		}
+		if subtle.ConstantTimeCompare(stored, sum[:]) == 1 {
+			return u, nil
+		}
+		return nil, ErrUnknownToken
+	}
+	return nil, ErrUnknownToken
+}
+
+// CredentialFingerprint identifies the current credential of a user (for
+// binding sessions: rotating the token invalidates them).
+func (s *UserStore) CredentialFingerprint(name string) string {
+	users, err := s.Users()
+	if err != nil {
+		return ""
+	}
+	for i := range users {
+		if users[i].Name == name {
+			h := sha256.Sum256([]byte(users[i].TokenHash + "|" + users[i].Token))
+			return hex.EncodeToString(h[:])
+		}
+	}
+	return ""
+}
+
+// UserByName resolves the current user record by name (sessions re-read this
+// on every request so permission edits apply immediately).
+func (s *UserStore) UserByName(name string) (*User, error) {
+	users, err := s.Users()
+	if err != nil {
+		return nil, err
+	}
+	for i := range users {
+		if users[i].Name == name {
+			return &users[i], nil
+		}
+	}
+	return nil, ErrUnknownToken
+}

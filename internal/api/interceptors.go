@@ -16,7 +16,10 @@ import (
 
 type ctxKey string
 
-const userCtxKey ctxKey = "sslly-api-user"
+const (
+	userCtxKey    ctxKey = "sslly-api-user"
+	sessionCtxKey ctxKey = "sslly-api-session"
+)
 
 // userFromContext returns the authenticated user attached by the auth
 // interceptor, or nil.
@@ -67,12 +70,15 @@ func auditInterceptor(users *config.UserStore) grpc.UnaryServerInterceptor {
 }
 
 // authAllowlist are method prefixes that skip bearer authentication.
-var authAllowlist = []string{"grpc.health.v1.", "grpc.reflection."}
+var authAllowlist = []string{"grpc.health.v1.", "grpc.reflection.", "/hnrobert.sslly.v1.AuthService/Authenticate"}
 
-// authInterceptor resolves the Bearer token against the UserStore and
-// attaches the user to the context. A broken or missing users.yaml fails
-// closed for every non-allowlisted call.
-func authInterceptor(users *config.UserStore) grpc.UnaryServerInterceptor {
+// authInterceptor resolves the Bearer SESSION token (issued by
+// AuthService.Authenticate) to its user. The long-lived users.yaml tokens are
+// deliberately NOT accepted here — they can only be exchanged for a session
+// via Authenticate. A broken or missing users.yaml fails closed for every
+// non-allowlisted call (sessions re-validate the credential fingerprint on
+// each request).
+func authInterceptor(users *config.UserStore, sessions *sessionStore) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		for _, prefix := range authAllowlist {
 			if strings.HasPrefix(info.FullMethod, prefix) {
@@ -88,11 +94,17 @@ func authInterceptor(users *config.UserStore) grpc.UnaryServerInterceptor {
 		if token == "" {
 			return nil, status.Error(codes.Unauthenticated, "missing bearer token")
 		}
-		u, err := users.VerifyToken(token)
-		if err != nil {
-			// Includes the broken-users.yaml error: fail closed.
-			return nil, status.Error(codes.Unauthenticated, "invalid token")
+		name, ok := sessions.lookup(token)
+		if !ok {
+			return nil, status.Error(codes.Unauthenticated, "invalid or expired session")
 		}
+		// Resolve the CURRENT user record (permissions may have changed since
+		// the session was issued; a deleted user fails closed).
+		u, err := users.UserByName(name)
+		if err != nil {
+			return nil, status.Error(codes.Unauthenticated, "invalid session")
+		}
+		ctx = context.WithValue(ctx, sessionCtxKey, token)
 		return handler(context.WithValue(ctx, userCtxKey, u), req)
 	}
 }

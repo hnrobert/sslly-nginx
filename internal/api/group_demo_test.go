@@ -70,15 +70,16 @@ media.streams:
 	if code != http.StatusOK {
 		t.Fatalf("upsert webdev = %d", code)
 	}
-	code, _ = e.post(t, "/v1/SetProxyEntry", "webdev-token",
+	webdev := e.login(t, "webdev", "webdev-token")
+	code, _ = e.post(t, "/v1/SetProxyEntry", webdev,
 		`{"entry":{"upstreamKey":"8080","listenerKeys":["front.example.com","front2.example.com"],"group":"web.front"}}`)
 	t.Logf("webdev edits web.front (web/* grant): %d (want 200)", code)
-	code, _ = e.post(t, "/v1/SetProxyEntry", "webdev-token",
+	code, _ = e.post(t, "/v1/SetProxyEntry", webdev,
 		`{"entry":{"upstreamKey":"1234","listenerKeys":["legacy.example.com"]}}`)
 	t.Logf("webdev edits TOP-LEVEL 1234:          %d (want 403)", code)
 
 	// List as webdev: only the web-group occurrences are visible.
-	code, body = e.post(t, "/v1/ListProxyEntries", "webdev-token", "{}")
+	code, body = e.post(t, "/v1/ListProxyEntries", webdev, "{}")
 	if code != http.StatusOK {
 		t.Fatalf("webdev list = %d", code)
 	}

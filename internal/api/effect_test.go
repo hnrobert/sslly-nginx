@@ -149,7 +149,7 @@ func TestPermissionChangesTakeEffectImmediately(t *testing.T) {
 	}
 
 	setRule := func(key string) int {
-		c, _ := e.post(t, "/v1/SetCorsRule", "live-token",
+		c, _ := e.post(t, "/v1/SetCorsRule", e.login(t, "live", "live-token"),
 			`{"rule":{"key":"`+key+`","allowOrigin":"https://x.test"},"updateMask":"allowOrigin"}`)
 		return c
 	}
@@ -172,7 +172,7 @@ func TestPermissionChangesTakeEffectImmediately(t *testing.T) {
 		t.Fatalf("write after downgrade = %d, want 403", c)
 	}
 	// ...but keeps read access.
-	code, _ = e.post(t, "/v1/ListCorsRules", "live-token", "{}")
+	code, _ = e.post(t, "/v1/ListCorsRules", e.login(t, "live", "live-token"), "{}")
 	if code != http.StatusOK {
 		t.Fatalf("read after downgrade = %d", code)
 	}
@@ -198,7 +198,7 @@ func TestHandEditedPermissionsTakeEffect(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("UpsertUser = %d", code)
 	}
-	code, _ = e.post(t, "/v1/GetLogsConfig", "hand-token", "{}")
+	code, _ = e.post(t, "/v1/GetLogsConfig", e.login(t, "hand", "hand-token"), "{}")
 	if code != http.StatusOK {
 		t.Fatalf("hand token should read logs, got %d", code)
 	}
@@ -207,7 +207,9 @@ func TestHandEditedPermissionsTakeEffect(t *testing.T) {
 	if err := e.srv.cfg.Editor.RestoreFile(config.UsersConfigFile, []byte("users: []\n")); err != nil {
 		t.Fatal(err)
 	}
-	code, _ = e.post(t, "/v1/GetLogsConfig", "hand-token", "{}")
+	// Removed user: their long-lived credentials no longer exchange for a
+	// session, and any previously issued session is dead too.
+	code, _ = e.post(t, "/v1/Authenticate", "", `{"name":"hand","token":"hand-token"}`)
 	if code != http.StatusUnauthorized {
 		t.Fatalf("removed user must stop authenticating, got %d", code)
 	}
@@ -225,7 +227,7 @@ func TestUpstreamScopedWriteBoundary(t *testing.T) {
 	}
 
 	set := func(upstream string) int {
-		c, _ := e.post(t, "/v1/SetProxyEntry", "portops-token",
+		c, _ := e.post(t, "/v1/SetProxyEntry", e.login(t, "portops", "portops-token"),
 			`{"entry":{"upstreamKey":"`+upstream+`","listenerKeys":["x.example.com"]}}`)
 		return c
 	}
@@ -239,11 +241,12 @@ func TestUpstreamScopedWriteBoundary(t *testing.T) {
 
 	// Delete is scoped the same way: 8080 (created above) is deletable, the
 	// fixture's 1234 is not.
-	code, _ = e.post(t, "/v1/DeleteProxyEntry", "portops-token", `{"upstreamKey":"8080"}`)
+	portops := e.login(t, "portops", "portops-token")
+	code, _ = e.post(t, "/v1/DeleteProxyEntry", portops, `{"upstreamKey":"8080"}`)
 	if code != http.StatusOK {
 		t.Fatalf("delete within granted upstream = %d", code)
 	}
-	code, _ = e.post(t, "/v1/DeleteProxyEntry", "portops-token", `{"upstreamKey":"1234"}`)
+	code, _ = e.post(t, "/v1/DeleteProxyEntry", portops, `{"upstreamKey":"1234"}`)
 	if code != http.StatusForbidden {
 		t.Fatalf("delete outside granted upstream = %d, want 403", code)
 	}
@@ -262,12 +265,12 @@ func TestTokenFieldHotReloadAuth(t *testing.T) {
 	e := newTestEnv(t)
 
 	// Simulate the operator hand-editing users.yaml at runtime: append a
-	// token-style user next to the existing hash-style admin/ops.
+	// token-style user next to the existing hash-style admin.
 	path := config.UsersFilePath(e.dir)
 	if err := os.WriteFile(path, []byte(
 		"users:\n"+
 			"  - name: admin\n"+
-			"    token_hash: "+config.HashToken(e.adminToken)+"\n"+
+			"    token_hash: "+config.HashToken("admin-token")+"\n"+
 			"    permissions:\n      - surface: users\n        mode: read-write\n"+
 			"  - name: pwuser\n"+
 			"    token: live-plaintext\n"+
@@ -280,14 +283,15 @@ func TestTokenFieldHotReloadAuth(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Hash-style user still authenticates.
-	code, _ := e.post(t, "/v1/ListUsers", e.adminToken, "{}")
+	// Hash-style user still authenticates (the rewrite rotated admin's
+	// credential fingerprint, so exchange a FRESH session).
+	code, _ := e.post(t, "/v1/ListUsers", e.login(t, "admin", "admin-token"), "{}")
 	if code != http.StatusOK {
 		t.Fatalf("hash-style admin = %d", code)
 	}
 
 	// token-style user authenticates with the plaintext as bearer.
-	code, _ = e.post(t, "/v1/GetLogsConfig", "live-plaintext", "{}")
+	code, _ = e.post(t, "/v1/GetLogsConfig", e.login(t, "pwuser", "live-plaintext"), "{}")
 	if code != http.StatusOK {
 		t.Fatalf("token-style user = %d", code)
 	}
@@ -488,12 +492,12 @@ func TestDeployScopedUser(t *testing.T) {
 	}
 
 	zb64 := base64.StdEncoding.EncodeToString(zipBytes(t, map[string]string{"index.html": "x"}))
-	code, _ = e.post(t, "/v1/DeployStatic", "rel-token",
+	code, _ = e.post(t, "/v1/DeployStatic", e.login(t, "rel", "rel-token"),
 		`{"domain":"app.myapps.example","distZip":"`+zb64+`"}`)
 	if code != http.StatusOK {
 		t.Fatalf("scoped deploy = %d", code)
 	}
-	code, _ = e.post(t, "/v1/DeployStatic", "rel-token",
+	code, _ = e.post(t, "/v1/DeployStatic", e.login(t, "rel", "rel-token"),
 		`{"domain":"other.example.net","distZip":"`+zb64+`"}`)
 	if code != http.StatusForbidden {
 		t.Fatalf("out-of-scope deploy = %d, want 403", code)
