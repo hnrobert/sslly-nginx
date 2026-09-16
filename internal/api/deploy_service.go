@@ -34,6 +34,15 @@ type deployService struct {
 // deployDir returns the absolute deploy root (creating it on demand). The
 // default lives under the static volume so deployments survive container
 // recreation without an extra mount.
+//
+// Every directory on the path (the root itself and each existing parent up
+// to "/") is chmod 0777: nginx serves the files as an unprivileged worker,
+// and NAS/docker bind-mount parents occasionally arrive with modes (or ACLs)
+// that deny traversal to non-root users — which previously surfaced as
+// `stat() index.html (13: Permission denied)` followed by a try_files
+// redirect cycle and a 500. chmod clears the POSIX ACL mask too, so both
+// plain modes and ACL-restricted parents are opened up. Best effort: chmod
+// failures are ignored (read-only mounts just keep serving as before).
 func (s *Server) deployDir() (string, error) {
 	root := s.cfg.DeployDir
 	if root == "" {
@@ -45,6 +54,11 @@ func (s *Server) deployDir() (string, error) {
 	}
 	if err := os.MkdirAll(abs, 0777); err != nil {
 		return "", err
+	}
+	for dir := abs; dir != "/" && dir != "."; dir = filepath.Dir(dir) {
+		if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
+			_ = os.Chmod(dir, 0777)
+		}
 	}
 	return abs, nil
 }
@@ -150,6 +164,9 @@ func unzipDist(distZip []byte, dst string) error {
 
 	// Strip a single wrapping directory (the usual "dist/" wrapper).
 	stripWrapperDir(absDst)
+	// os.MkdirTemp created the staging dir 0700: open it up, since the final
+	// directory inherits this mode through the activating rename.
+	_ = os.Chmod(absDst, 0777)
 	return nil
 }
 

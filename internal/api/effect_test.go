@@ -499,3 +499,39 @@ func TestDeployScopedUser(t *testing.T) {
 		t.Fatalf("out-of-scope deploy = %d, want 403", code)
 	}
 }
+
+// TestDeployStaticOpensParentDirs: the deploy root and every parent must end
+// up world-traversable (0777) so the unprivileged nginx worker can serve the
+// files — NAS bind-mount parents have been observed denying traversal even
+// with seemingly-open modes (ACLs), surfacing as try_files 500s.
+func TestDeployStaticOpensParentDirs(t *testing.T) {
+	base := t.TempDir()
+	staticRoot := filepath.Join(base, "static")
+	if err := os.MkdirAll(staticRoot, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// A restrictive parent: mode 0700 would block any other user.
+	if err := os.Chmod(staticRoot, 0700); err != nil {
+		t.Skipf("cannot chmod on this platform: %v", err)
+	}
+
+	e := newTestEnv(t)
+	e.srv.cfg.DeployDir = filepath.Join(staticRoot, "deploy")
+
+	zb64 := base64.StdEncoding.EncodeToString(zipBytes(t, map[string]string{"index.html": "ok"}))
+	code, body := e.post(t, "/v1/DeployStatic", e.adminToken,
+		`{"domain":"perm.example.com","distZip":"`+zb64+`"}`)
+	if code != http.StatusOK || !strings.Contains(body, `"applied":true`) {
+		t.Fatalf("DeployStatic = %d %s", code, body)
+	}
+
+	for _, dir := range []string{staticRoot, filepath.Join(staticRoot, "deploy"), filepath.Join(staticRoot, "deploy", "perm.example.com")} {
+		fi, err := os.Stat(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fi.Mode().Perm() != 0777 {
+			t.Fatalf("%s mode = %o, want 0777", dir, fi.Mode().Perm())
+		}
+	}
+}
