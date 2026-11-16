@@ -89,14 +89,15 @@ func (p Protocol) IsGRPC() bool {
 }
 
 type Config struct {
-	Log             LogConfig             `yaml:"log"`
-	CORS            map[string]CORSConfig `yaml:"cors"`
-	NoTrailingSlash []string              `yaml:"no_trailing_slash"`
-	Ports           map[string][]string   `yaml:",inline"`
+	Log              LogConfig             `yaml:"log"`
+	CORS             map[string]CORSConfig `yaml:"cors"`
+	NoTrailingSlash  []string              `yaml:"no_trailing_slash"`
+	NoUpgradeHeaders []string              `yaml:"no_upgrade_headers"`
+	Ports            map[string][]string   `yaml:",inline"`
 
 	// OrderedPorts holds the top-level proxy.yaml mapping keys in their file
-	// order (excluding the special cors/log/no_trailing_slash keys). It is
-	// used to emit nginx server blocks deterministically, in declaration order.
+	// order (excluding special configuration keys). It is used to emit nginx
+	// server blocks deterministically, in declaration order.
 	// Runtime-only (not persisted to YAML).
 	OrderedPorts []string `yaml:"-"`
 

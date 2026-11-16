@@ -167,7 +167,7 @@ a.b:                  # flat dotted form == nested a: { b: { ... } }
 ```
 
 - Group path segments match `[a-zA-Z0-9_-]+`; dots only separate levels.
-- Reserved names (`cors`, `log`, `no_trailing_slash`) cannot be group segments.
+- Reserved names (`cors`, `log`, `no_trailing_slash`, `no_upgrade_headers`) cannot be group segments.
 - Groups are **purely organizational**: after flattening, routing behaves
   exactly as if the file were flat; nginx output order follows first
   appearance.
@@ -330,6 +330,36 @@ location /api/ {
 no_trailing_slash:
   - example.com/api
 ```
+
+### WebSocket Upgrade Headers
+
+By default, HTTP proxy routes include the following settings for WebSocket support:
+
+```nginx
+proxy_set_header Upgrade $http_upgrade;
+proxy_set_header Connection "upgrade";
+```
+
+Some upstreams interpret `Connection: upgrade` as a WebSocket request even for ordinary HTTP requests. To omit both settings for selected routes, add `no_upgrade_headers` to `proxy.yaml`:
+
+```yaml
+8080:
+  - api.example.com
+  - shared.example.com/api
+  - shared.example.com/chat
+
+no_upgrade_headers:
+  - api.example.com
+  - shared.example.com/api
+```
+
+**Rules:**
+
+- Values use the same exact domain + path matching as `no_trailing_slash`: `api.example.com` matches its root route only, not every path on the domain.
+- Only listed HTTP proxy routes omit the two settings, for both HTTP-only and HTTPS servers. Other proxy headers, timeouts, and routing are unchanged.
+- An omitted or empty list preserves the existing WebSocket behavior on all routes.
+- WebSocket upgrades are disabled on listed routes. Nginx uses its normal proxy defaults instead (including `Connection: close`); this does not clear every upstream header.
+- Static sites and gRPC/TCP/UDP routes are unaffected.
 
 ---
 

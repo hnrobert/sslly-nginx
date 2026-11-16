@@ -16,6 +16,10 @@ func GenerateConfig(cfg *config.Config, certMap map[string]ssl.Certificate) stri
 	for _, p := range cfg.NoTrailingSlash {
 		noTrailingSlash[p] = true
 	}
+	noUpgradeHeaders := make(map[string]bool, len(cfg.NoUpgradeHeaders))
+	for _, p := range cfg.NoUpgradeHeaders {
+		noUpgradeHeaders[p] = true
+	}
 
 	var sb strings.Builder
 
@@ -299,7 +303,7 @@ events {
 
 			// Generate location blocks for proxy routes
 			if len(routes) > 0 {
-				generateProxyLocations(&sb, routes, corsConfig, noTrailingSlash)
+				generateProxyLocations(&sb, routes, corsConfig, noTrailingSlash, noUpgradeHeaders)
 			}
 
 			sb.WriteString(`    }
@@ -344,7 +348,7 @@ events {
 
 		// Generate location blocks for proxy routes
 		if len(routes) > 0 {
-			generateProxyLocations(&sb, routes, corsConfig, noTrailingSlash)
+			generateProxyLocations(&sb, routes, corsConfig, noTrailingSlash, noUpgradeHeaders)
 		}
 
 		sb.WriteString(`    }

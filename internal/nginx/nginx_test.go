@@ -1,6 +1,7 @@
 package nginx
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -268,6 +269,63 @@ func TestGenerateConfig_StaticSitesWithProxy(t *testing.T) {
 	// Check that static site server block has root
 	if !strings.Contains(nginxConfig, "server_name static.example.com;") {
 		t.Error("Should have server block for static.example.com")
+	}
+}
+
+func TestGenerateConfig_NoUpgradeHeaders(t *testing.T) {
+	for _, tls := range []bool{false, true} {
+		for _, disabled := range []string{"", "example.com", "example.com/api"} {
+			t.Run(fmt.Sprintf("tls=%t/disabled=%s", tls, disabled), func(t *testing.T) {
+				dir := t.TempDir()
+				proxy := "8080: [example.com, example.com/api, example.com/api/v2, other.example.com]\n"
+				if disabled != "" {
+					proxy += "no_upgrade_headers: [" + disabled + "]\n"
+				}
+				if err := os.WriteFile(filepath.Join(dir, "proxy.yaml"), []byte(proxy), 0644); err != nil {
+					t.Fatal(err)
+				}
+				cfg, err := config.Load(dir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				certs := map[string]ssl.Certificate{}
+				if tls {
+					for _, domain := range []string{"example.com", "other.example.com"} {
+						certs[domain] = ssl.Certificate{CertPath: "/cert.pem", KeyPath: "/key.pem"}
+					}
+				}
+				ng := GenerateConfig(cfg, certs)
+				for _, domain := range []string{"example.com", "other.example.com"} {
+					_, server, ok := strings.Cut(ng, "server_name "+domain+";")
+					if !ok {
+						t.Fatalf("missing server for %s", domain)
+					}
+					server, _, _ = strings.Cut(server, "\n    }")
+					paths := []string{""}
+					if domain == "example.com" {
+						paths = append(paths, "/api", "/api/v2")
+					}
+					for _, path := range paths {
+						_, location, ok := strings.Cut(server, "location "+path+"/ {")
+						if !ok {
+							t.Fatalf("missing location for %s%s", domain, path)
+						}
+						location, _, _ = strings.Cut(location, "\n        }")
+						wantUpgrade := domain+path != disabled
+						for _, header := range []string{"proxy_set_header Upgrade $http_upgrade;", `proxy_set_header Connection "upgrade";`} {
+							if strings.Contains(location, header) != wantUpgrade {
+								t.Errorf("%s%s: want upgrade headers=%t, got:\n%s", domain, path, wantUpgrade, location)
+							}
+						}
+						for _, unchanged := range []string{"proxy_pass http://127.0.0.1:8080", "proxy_http_version 1.1;", "proxy_set_header Host $host;", "proxy_read_timeout 60s;"} {
+							if !strings.Contains(location, unchanged) {
+								t.Errorf("%s%s: missing %q", domain, path, unchanged)
+							}
+						}
+					}
+				}
+			})
+		}
 	}
 }
 
