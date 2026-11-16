@@ -20,6 +20,10 @@ ssl/
 *.dylib
 sslly-nginx
 
+# Generated SDK code for non-Go consumers (the Go server code in gen/ MUST
+# stay in the context — the image build does not regenerate it)
+sdks/
+
 # Test files
 *_test.go
 *.test

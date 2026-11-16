@@ -19,6 +19,8 @@ on:
       - "**/*.go"
       - "go.mod"
       - "go.sum"
+      - "proto/**"
+      - "Makefile"
 
 jobs:
   test:
@@ -27,12 +29,23 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # buf breaking walks git history
 
       - name: Setup Go with cache
         uses: ./.github/actions/setup-go
         with:
-          go-version: "1.21"
+          go-version: "1.25"
+
+      - name: Setup Buf
+        uses: bufbuild/buf-action@v1
+        with:
+          setup_only: true # buf-setup-action is deprecated; token lifts remote-plugin rate limits
+          token: ${{ secrets.BUF_TOKEN }}
+
+      - name: Generate protobuf code
+        run: make generate
 
       - name: Verify dependencies
         run: go mod verify
@@ -50,3 +63,9 @@ jobs:
             gofmt -s -d .
             exit 1
           fi
+
+      - name: Lint protos
+        run: make proto-lint
+
+      - name: Check breaking changes
+        run: make proto-breaking

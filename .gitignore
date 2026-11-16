@@ -42,10 +42,19 @@ configs/config.yml
 configs/proxy.yaml
 configs/cors.yaml
 configs/logs.yaml
+configs/users.yaml
 ssl/*
 
 # Build output
 bin/
+
+# Generated protobuf code (regenerate with `make generate`)
+gen/
+*.pb.go
+*.pb.gw.go
+
+# Generated SDK code for non-Go consumers (regenerate with `make generate`)
+sdks/
 
 # Keep example files
 !configs/*.example.yaml

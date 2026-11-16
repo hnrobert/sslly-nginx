@@ -51,7 +51,7 @@ func (a *App) setupWatchers() error {
 					event.Op&fsnotify.Remove == fsnotify.Remove ||
 					event.Op&fsnotify.Chmod == fsnotify.Chmod {
 					logger.Info("Config file changed: %s", event.Name)
-					a.scheduleReload()
+					a.scheduleConfigReload()
 				}
 			case err, ok := <-configWatcher.Errors:
 				if !ok {
@@ -76,7 +76,7 @@ func (a *App) setupWatchers() error {
 					event.Op&fsnotify.Remove == fsnotify.Remove ||
 					event.Op&fsnotify.Chmod == fsnotify.Chmod {
 					logger.Info("SSL file changed: %s", event.Name)
-					a.scheduleReload()
+					a.scheduleSSLReload()
 				}
 			case err, ok := <-sslWatcher.Errors:
 				if !ok {
@@ -249,12 +249,30 @@ func (a *App) handleNginxConfEdit(src, dst string) {
 	logger.Info("nginx reloaded from manual edit of %s", src)
 }
 
-func (a *App) scheduleReload() {
+// scheduleConfigReload / scheduleSSLReload arm the shared 800ms debounce
+// with a pending flag telling the timer WHAT changed:
+//
+//   - SSL changes always force a reload (certs are not part of the config
+//     hash);
+//   - config changes reload only when the YAML files no longer match the
+//     last successfully applied state — an API-triggered reload that already
+//     applied (or reverted) the change makes the watcher's duplicate a no-op.
+func (a *App) scheduleConfigReload() { a.scheduleReloadKind(true, false) }
+
+func (a *App) scheduleSSLReload() { a.scheduleReloadKind(false, true) }
+
+func (a *App) scheduleReloadKind(pendingConfig, pendingSSL bool) {
 	const debounceWindow = 800 * time.Millisecond
 
 	a.reloadDebounceMu.Lock()
 	a.reloadDebounceSeq++
 	seq := a.reloadDebounceSeq
+	if pendingConfig {
+		a.reloadPendingConfig = true
+	}
+	if pendingSSL {
+		a.reloadPendingSSL = true
+	}
 	if a.reloadDebounceTimer != nil {
 		a.reloadDebounceTimer.Stop()
 	}
@@ -264,8 +282,28 @@ func (a *App) scheduleReload() {
 			a.reloadDebounceMu.Unlock()
 			return
 		}
+		doConfig := a.reloadPendingConfig
+		doSSL := a.reloadPendingSSL
+		a.reloadPendingConfig = false
+		a.reloadPendingSSL = false
 		a.reloadDebounceMu.Unlock()
-		a.handleReload()
+
+		if doSSL {
+			// Certificates changed: reload unconditionally.
+			if err := a.handleReload(); err != nil {
+				logger.Error("SSL-triggered reload failed (rolled back): %v", err)
+			}
+			return
+		}
+		if doConfig && !a.configUnchangedSinceApply() {
+			if err := a.handleReload(); err != nil {
+				logger.Error("Config-triggered reload failed (rolled back): %v", err)
+			}
+			return
+		}
+		if doConfig {
+			logger.Info("Config unchanged since last applied state; skipping duplicate reload")
+		}
 	})
 	a.reloadDebounceMu.Unlock()
 }

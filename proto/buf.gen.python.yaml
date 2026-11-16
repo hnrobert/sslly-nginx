@@ -1,0 +1,15 @@
+# Python codegen template — reference for Python consumers and a CI smoke
+# test. Managed mode has no Python-specific file options; the disable keeps
+# googleapis stubs untouched. Consumers can copy this file and run
+# `buf generate buf.build/sslly-nginx/sslly-nginx` when they need custom
+# options; otherwise prefer the hosted PEP 503 index (see docs/SDK.md).
+version: v2
+managed:
+  enabled: true
+  disable:
+    - module: buf.build/googleapis/googleapis
+plugins:
+  - remote: buf.build/protocolbuffers/python
+    out: ../sdks/python/gen
+  - remote: buf.build/grpc/python
+    out: ../sdks/python/gen

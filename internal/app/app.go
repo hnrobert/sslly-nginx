@@ -1,11 +1,14 @@
 package app
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/hnrobert/sslly-nginx/internal/api"
 	"github.com/hnrobert/sslly-nginx/internal/backup"
 	"github.com/hnrobert/sslly-nginx/internal/config"
 	"github.com/hnrobert/sslly-nginx/internal/logger"
@@ -34,6 +37,16 @@ type App struct {
 	staticSites         map[string]*runningStaticSite
 	reloadMu            sync.Mutex
 
+	// Control API (gRPC + gateway) and its dependencies.
+	apiServer *api.Server
+	users     *config.UserStore
+	editor    *config.Editor
+
+	// configHashMu guards lastAppliedConfigHash (sha256 of the YAML files
+	// behind the running nginx config; see reload.go).
+	configHashMu          sync.Mutex
+	lastAppliedConfigHash string
+
 	// suppress nginx.conf watchers for 2s after a programmatic write
 	suppressNginxMu         sync.Mutex
 	suppressNginxWatchUntil time.Time
@@ -41,6 +54,8 @@ type App struct {
 	reloadDebounceMu    sync.Mutex
 	reloadDebounceTimer *time.Timer
 	reloadDebounceSeq   uint64
+	reloadPendingConfig bool
+	reloadPendingSSL    bool
 }
 
 func New() (*App, error) {
@@ -48,6 +63,19 @@ func New() (*App, error) {
 		nginxManager: nginx.NewManager(),
 		staticSites:  make(map[string]*runningStaticSite),
 	}, nil
+}
+
+// certDomainSet snapshots the domains of the currently active certificates
+// (fed to the control API's pre-write validation). reloadMu mirrors the
+// writes in reload(), keeping the map read race-free.
+func (a *App) certDomainSet() map[string]bool {
+	a.reloadMu.Lock()
+	defer a.reloadMu.Unlock()
+	out := make(map[string]bool, len(a.activeCertMap))
+	for domain := range a.activeCertMap {
+		out[domain] = true
+	}
+	return out
 }
 
 func (a *App) Start() error {
@@ -128,6 +156,48 @@ func (a *App) Start() error {
 
 	// Save the good configuration
 	a.saveGoodConfiguration()
+	a.recordAppliedConfigHash()
+
+	// Control API: DISABLED unless SSLLY_API_HTTP_ADDR / SSLLY_API_GRPC_ADDR
+	// is explicitly set — no listener, and no users.yaml bootstrap either.
+	grpcAddr := os.Getenv(api.EnvGRPCAddr)
+	httpAddr := os.Getenv(api.EnvHTTPAddr)
+	if grpcAddr == "" && httpAddr == "" {
+		logger.Info("Control API disabled (set SSLLY_API_HTTP_ADDR and/or SSLLY_API_GRPC_ADDR to enable)")
+	} else {
+		if token, err := config.EnsureUsersFile(configDir, os.Getenv(api.EnvAdminToken)); err != nil {
+			return fmt.Errorf("failed to bootstrap control API users: %w", err)
+		} else if token != "" {
+			logger.Warn("Control API admin token (random, shown ONCE — save it now): %s", token)
+		}
+		a.editor = config.NewEditor(configDir)
+
+		// Cold-start migration: convert any plaintext `token` fields in
+		// users.yaml to token_hash and strip them (hot reloads never do this —
+		// they verify against the token field directly instead).
+		if n, err := a.editor.MigrateTokensToHashes(); err != nil {
+			logger.Warn("users.yaml token migration failed; token fields stay in place and remain usable: %v", err)
+		} else if n > 0 {
+			logger.Info("Converted %d plaintext token(s) in users.yaml to token_hash", n)
+		}
+
+		a.users = config.LoadUserStore(configDir)
+		apiSrv := api.New(api.Config{
+			GRPCAddr:    grpcAddr,
+			HTTPAddr:    httpAddr,
+			ConfigDir:   configDir,
+			Reload:      a.ApplyReload,
+			Users:       a.users,
+			Editor:      a.editor,
+			CertDomains: a.certDomainSet,
+			DeployDir:   os.Getenv("SSLLY_DEPLOY_DIR"),
+			SessionTTL:  sessionTTLFromEnv(),
+		})
+		if err := apiSrv.Start(); err != nil {
+			return fmt.Errorf("failed to start control API: %w", err)
+		}
+		a.apiServer = apiSrv
+	}
 
 	// Setup watchers
 	if err := a.setupWatchers(); err != nil {
@@ -139,6 +209,13 @@ func (a *App) Start() error {
 }
 
 func (a *App) Stop() {
+	// Stop the control API first (reverse startup order): no new requests,
+	// drain in-flight RPCs, then tear down the rest.
+	if a.apiServer != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		a.apiServer.Stop(ctx)
+		cancel()
+	}
 	if a.configWatcher != nil {
 		a.configWatcher.Stop()
 	}
@@ -156,4 +233,16 @@ func (a *App) Stop() {
 	}
 	a.reloadDebounceMu.Unlock()
 	a.nginxManager.Stop()
+}
+
+// sessionTTLFromEnv parses SSLLY_API_SESSION_TTL as a Go duration
+// (e.g. "30m", "12h"); empty or invalid falls back to 12h.
+func sessionTTLFromEnv() time.Duration {
+	if v := os.Getenv("SSLLY_API_SESSION_TTL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+		logger.Warn("invalid SSLLY_API_SESSION_TTL %q, using default 12h", v)
+	}
+	return 0 // api package default
 }

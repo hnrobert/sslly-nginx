@@ -1,0 +1,64 @@
+# sslly-nginx control API users.
+# Credentials come in two forms:
+#   token: <plaintext>   — convenient; verified as-is on hot reloads, and
+#                             converted to token_hash (then stripped) on the
+#                             next service restart.
+#   token_hash: <sha256 hex> — steady-state form. Generate one with:
+#     printf '%s' 'your-secret-token' | shasum -a 256    # macOS
+#     printf '%s' 'your-secret-token' | sha256sum        # Linux
+# Selector notes: domains entries are exact domains or "*.suffix" (subdomains
+# only, not the bare apex); upstreams entries match proxy.yaml upstream keys
+# verbatim. An absent selector means unrestricted on that dimension.
+users:
+  - name: admin
+    token_hash: 0000000000000000000000000000000000000000000000000000000000000000
+    permissions:
+      - surface: proxy
+        mode: read-write
+      - surface: cors
+        mode: read-write
+      - surface: logs
+        mode: read-write
+      - surface: users
+        mode: read-write
+      - surface: deploy
+        mode: read-write
+
+  # Example limited operator: full CORS control under *.ibuduan.com, read-only
+  # proxy visibility, and management of port 8080 routes only.
+  # - name: ops
+  #   token_hash: <sha256 hex>
+  #   permissions:
+  #     - surface: cors
+  #       mode: read-write
+  #       domains: ["*.ibuduan.com"]
+  #     - surface: proxy
+  #       mode: read-write
+  #       upstreams: ["8080"]
+  #     - surface: proxy
+  #       mode: read
+
+  # Example using the plaintext convenience form: write the token directly,
+  # no hashing needed. On a running service it authenticates immediately
+  # (hot reloads never rewrite the file); the next service restart converts
+  # it to token_hash, strips the plaintext, and marks the line
+  # "# converted from token at startup".
+  # - name: devops
+  #   token: just-type-your-token-here
+  #   permissions:
+  #     - surface: logs
+  #       mode: read-write
+  #     - surface: users
+  #       mode: read
+
+  # Example release engineer: may deploy static sites to *.myapps.example.com
+  # and edit every route inside the "web" proxy.yaml group.
+  # - name: rel
+  #   token_hash: <sha256 hex>
+  #   permissions:
+  #     - surface: deploy
+  #       mode: read-write
+  #       domains: ["*.myapps.example"]
+  #     - surface: proxy
+  #       mode: read-write
+  #       upstreams: ["web/*"]

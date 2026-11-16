@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/hnrobert/sslly-nginx/internal/config"
 	"github.com/hnrobert/sslly-nginx/internal/logger"
@@ -112,36 +111,4 @@ func (a *App) prepareStaticSitesForReload(cfg *config.Config) (*config.Config, f
 	}
 
 	return &effective, finalize, nil
-}
-
-// applyStaticSiteRoute appends route path to domains that don't already have a path
-func applyStaticSiteRoute(domains []string, route string) []string {
-	route = strings.TrimSpace(route)
-	if route == "" || route == "/" {
-		return append([]string(nil), domains...)
-	}
-	if !strings.HasPrefix(route, "/") {
-		route = "/" + route
-	}
-
-	out := make([]string, 0, len(domains))
-	for _, d := range domains {
-		ds := strings.TrimSpace(d)
-		if ds == "" {
-			continue
-		}
-		if strings.Contains(ds, "/") {
-			out = append(out, ds)
-			continue
-		}
-		out = append(out, ds+route)
-	}
-	return out
-}
-
-// sameDir compares two directory paths for equality
-func sameDir(a, b string) bool {
-	a = filepath.Clean(strings.TrimSpace(a))
-	b = filepath.Clean(strings.TrimSpace(b))
-	return a == b
 }

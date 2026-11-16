@@ -1,0 +1,16 @@
+// Apply result shared by mutating RPCs.
+syntax = "proto3";
+
+package hnrobert.sslly.v1;
+
+// CMsgApplyResult reports the outcome of a configuration change after it was
+// written to disk and pushed through the validated nginx reload pipeline
+// (snapshot -> reload -> `nginx -t` -> commit or rollback).
+message CMsgApplyResult {
+  // True when the change was applied and committed.
+  bool applied = 1;
+  // Non-empty when applied is false: the reload stage that failed and the
+  // cause. The pipeline rolled back nginx to the last good configuration and
+  // the YAML file was restored to its previous content.
+  string error = 2;
+}

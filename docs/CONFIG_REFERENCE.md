@@ -27,8 +27,8 @@ static_directory//url_route
 ### upstream_key Components
 
 | Component | Required | Default | Description |
-|-----------|----------|---------|-------------|
-| `upstream_protocol` | No | `http` | Protocol prefix: `https`, `tcp`, `udp`. Omit for `http` |
+| ----------- | ---------- | --------- | ------------- |
+| `upstream_protocol` | No | `http` | Protocol prefix: `https`, `grpc`, `tcp`, `udp`. Omit for `http` |
 | `domain` | No | `127.0.0.1` | IP address or hostname. IPv6 must use brackets `[::1]` |
 | `port` | No | Protocol default | Port number |
 | `routes` | No | - | URL path routing (e.g., `/api`) |
@@ -38,6 +38,7 @@ static_directory//url_route
 
 - **HTTP** (default): 80
 - **HTTPS**: 443
+- **gRPC**: 50051
 - **TCP/UDP**: Required (error if missing)
 
 ### Static Route Rules
@@ -54,7 +55,7 @@ static_directory//url_route
 ### Upstream Format Examples
 
 | Type | Format | Parsed As |
-|------|--------|-----------|
+| ------ | -------- | ----------- |
 | Port only | `8080` | `http://127.0.0.1:8080` |
 | IP:port | `192.168.1.1:3000` | `http://192.168.1.1:3000` |
 | Domain only | `api.example.com` | `http://api.example.com:80` |
@@ -67,6 +68,7 @@ static_directory//url_route
 | Static simple | `/app/static` | Serve `/app/static` |
 | Static with route | `/app/static//docs` | Serve `/app/static` at `/docs` |
 | Static with colon | `/app/static:v2` | Serve `/app/static:v2` |
+| gRPC upstream | `<grpc>9081` | gRPC (HTTP/2) proxy to `127.0.0.1:9081` |
 
 ## listener_key Format
 
@@ -77,7 +79,7 @@ static_directory//url_route
 ### listener_key Components
 
 | Component | Required | Default | Description |
-|-----------|----------|---------|-------------|
+| ----------- | ---------- | --------- | ------------- |
 | `listen_protocol` | No | Smart mode | Listen protocol: `http`, `https`, `tcp`, `udp` |
 | `listened_server_name` | No | All interfaces | Server name (domain) to listen on |
 | `listened_port` | No | Env var ports | Listen port |
@@ -88,9 +90,9 @@ When `listen_protocol` is not specified:
 
 - **TCP/UDP upstream** → automatically use same protocol for listen
 - **HTTP/HTTPS upstream** → adaptive based on certificate:
-  - Domain has SSL certificate → HTTPS
-  - Upstream is `<https>` → HTTPS
-  - Otherwise → HTTP
+   - Domain has SSL certificate → HTTPS
+   - Upstream is `<https>` → HTTPS
+   - Otherwise → HTTP
 
 ### listener_key Separator Rules
 
@@ -100,7 +102,7 @@ When `listen_protocol` is not specified:
 ### Listener Format Examples
 
 | Format | Example | Description |
-|--------|---------|-------------|
+| -------- | --------- | ------------- |
 | Domain only | `example.com` | Listen on domain, default port |
 | Port only | `8080` | Listen on port, all domains |
 | Domain\|port | `example.com\|8080` | Specific domain and port |
@@ -141,6 +143,66 @@ example-server.local:8080:
   - shared.example.com
 192.168.50.2:5678/api:
   - shared.example.com/api
+```
+
+### Route Groups
+
+Routes can be organized under group mappings — a top-level key whose value is
+a MAPPING is a group; a SEQUENCE value is a route (that holds at any depth,
+so upstream keys containing dots or slashes stay unambiguous):
+
+```yaml
+1234:                 # plain top-level route
+  - a.example.com
+
+class1:               # group (nested form)
+  1234:               # the SAME key may appear in several groups /
+    - asd.asd.com     # and at top level: listeners merge in declaration order
+  9090:
+    - b.example.com
+
+a.b:                  # flat dotted form == nested a: { b: { ... } }
+  8080:
+    - c.example.com
+```
+
+- Group path segments match `[a-zA-Z0-9_-]+`; dots only separate levels.
+- Reserved names (`cors`, `log`, `no_trailing_slash`) cannot be group segments.
+- Groups are **purely organizational**: after flattening, routing behaves
+  exactly as if the file were flat; nginx output order follows first
+  appearance.
+- The control API's `SetProxyEntry`/`DeleteProxyEntry` take a `group` field
+  ("a.b"; empty = top level); the editor always writes the canonical nested
+  form. `upstreams` permission selectors understand `group/key` and
+  `group/*` (see [API.md](API.md)).
+
+### gRPC Reverse Proxy
+
+`<grpc>` upstreams terminate HTTP/2 at nginx (`grpc_pass` to the backend over
+cleartext h2c). A domain with a certificate serves gRPC over TLS (h2 via
+ALPN); without one it serves cleartext h2c.
+
+Rules:
+
+- The listener must be a **bare domain** (optionally `domain|port`) — gRPC
+  method paths (`/package.Service/Method`) cannot live under a location
+  prefix, so path-based routing is rejected
+- A gRPC domain **cannot mix** with HTTP proxy or static routes on the same
+  server name (gRPC owns `location /`); mixed domains skip the gRPC route
+  with a visible warning comment
+- The upstream port is required in practice (`<grpc>9081`); a bare hostname
+  defaults to the conventional 50051
+
+```yaml
+# TLS gRPC (domain has a certificate) or h2c (no certificate)
+<grpc>9081:
+  - grpc.example.com
+```
+
+```bash
+# verify
+grpcurl -plaintext grpc.example.com:80 list        # h2c domain
+grpcurl grpc.example.com:443 list                  # TLS domain
 ```
 
 ### TCP/UDP Stream Forwarding
@@ -276,7 +338,7 @@ no_trailing_slash:
 ### Protocol Compatibility
 
 | Upstream | Listener | Behavior |
-|---------|----------|----------|
+| --------- | ---------- | ---------- |
 | HTTP/HTTPS | HTTP/HTTPS | Allowed |
 | HTTP/HTTPS | TCP/UDP | Error - config ignored |
 | HTTP/HTTPS | Static | Error - config ignored |
@@ -288,7 +350,7 @@ no_trailing_slash:
 ### Error Handling
 
 | Error Type | Behavior |
-|------------|----------|
+| ------------ | ---------- |
 | YAML format error | Entire configuration fails |
 | Invalid upstream key | Individual entry ignored |
 | Invalid listener key | Individual entry ignored |
@@ -300,14 +362,56 @@ no_trailing_slash:
 ## Environment Variables
 
 | Variable | Default | Description |
-|----------|---------|-------------|
+| ---------- | --------- | ------------- |
 | `SSLLY_DEFAULT_HTTP_LISTEN_PORT` | 80 | Default HTTP listen port |
 | `SSLLY_DEFAULT_HTTPS_LISTEN_PORT` | 443 | Default HTTPS listen port |
+| `SSLLY_API_HTTP_ADDR` | `:9080` | Control API HTTP/JSON gateway listen address |
+| `SSLLY_API_GRPC_ADDR` | `:9081` | Control API native gRPC listen address |
+| `SSLY_API_ADMIN_TOKEN` | — | Bootstrap admin token, hashed into `users.yaml` on first boot |
+| `SSLLY_API_SESSION_TTL` | `12h` | Control-API session lifetime (Go duration, e.g. `30m` / `24h`) |
+| `SSLLY_DEPLOY_DIR` | `./static/deploy` | Root directory for API-deployed static sites |
 
 **Legacy Variables (deprecated):**
 
 - `SSL_NGINX_HTTP_PORT`
 - `SSL_NGINX_HTTPS_PORT`
+
+## Control API Users (users.yaml)
+
+`configs/users.yaml` holds the control API's users: credentials plus
+permission rules (see [API.md](API.md) for the request-level semantics). It is
+created automatically on first boot with a full-access `admin` user; the token
+comes from `SSLLY_API_ADMIN_TOKEN` or a one-time random value printed to the
+log. Editing the file takes effect on the next API request without an nginx
+reload; the API can also manage users itself (`UsersService`).
+
+Two credential forms are accepted:
+
+- `token_hash: <sha256 hex>` — the steady-state form (generate with
+  `printf '%s' 'token' | shasum -a 256`);
+- `token: <plaintext>` — a convenience form. **On the next cold start**
+  the app converts it to `token_hash`, strips the plaintext, and leaves a
+  `# converted from token at startup` comment. **Hot reloads never touch
+  the file**: while a `token` field exists it is the authoritative
+  credential (any `token_hash` next to it is ignored).
+
+```yaml
+users:
+  - name: admin
+    token: change-me-now    # converted to token_hash on next restart
+    permissions:
+      - surface: proxy       # proxy | cors | logs | users
+        mode: read-write     # read | read-write
+  - name: ops
+    token_hash: 3f79bb7b...  # sha256(token) hex
+    permissions:
+      - surface: cors
+        mode: read-write
+        domains: ["*.ibuduan.com"]            # exact or *.suffix; absent = all
+      - surface: proxy
+        mode: read-write
+        upstreams: ["8080", "192.168.50.2:1234"]  # verbatim upstream keys; absent = all
+```
 
 ## Complete Examples
 

@@ -1,8 +1,11 @@
 package app
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/hnrobert/sslly-nginx/internal/backup"
@@ -119,7 +122,11 @@ func (a *App) reload(snapshotID string) error {
 	return nil
 }
 
-func (a *App) handleReload() {
+// handleReload runs the full validated reload pipeline (snapshot -> reload ->
+// SIGHUP -> health check -> commit, with automatic rollback on failure). It
+// returns a stage-prefixed error when the pipeline had to roll back; nil on
+// success. Serialized by reloadMu (shared with the control API's ApplyReload).
+func (a *App) handleReload() error {
 	a.reloadMu.Lock()
 	defer a.reloadMu.Unlock()
 
@@ -141,7 +148,7 @@ func (a *App) handleReload() {
 			_ = a.backupManager.Abort(snapID)
 		}
 		a.restoreGoodConfiguration()
-		return
+		return fmt.Errorf("reload: %w", err)
 	}
 
 	// Reload nginx
@@ -154,7 +161,7 @@ func (a *App) handleReload() {
 		if err := a.nginxManager.Reload(); err != nil {
 			logger.Error("Failed to restore nginx: %v", err)
 		}
-		return
+		return fmt.Errorf("nginx reload: %w", err)
 	}
 
 	// Check nginx health
@@ -167,7 +174,7 @@ func (a *App) handleReload() {
 		if err := a.nginxManager.Reload(); err != nil {
 			logger.Error("Failed to restore nginx: %v", err)
 		}
-		return
+		return fmt.Errorf("health check: %w", err)
 	}
 
 	if snapID != "" {
@@ -178,9 +185,17 @@ func (a *App) handleReload() {
 
 	// Save the new good configuration
 	a.saveGoodConfiguration()
+	a.recordAppliedConfigHash()
 
 	logDomainSummary(a.config, a.activeCertMap, a.sslReport, time.Now())
 	logger.Info("Configuration reloaded successfully")
+	return nil
+}
+
+// ApplyReload runs the validated reload pipeline synchronously; it backs the
+// control API's mutating RPCs (config changes there write the YAML first).
+func (a *App) ApplyReload() error {
+	return a.handleReload()
 }
 
 func (a *App) saveGoodConfiguration() {
@@ -216,4 +231,39 @@ func (a *App) restoreGoodConfiguration() {
 	} else {
 		logger.Info("Restored previous good configuration")
 	}
+}
+
+// configFilesHash hashes the effective YAML config files so the debounced
+// watcher can tell "already applied by the control API" from "really changed".
+func (a *App) configFilesHash() string {
+	h := sha256.New()
+	for _, name := range []string{config.ProxyConfigFile, config.LogsConfigFile, config.CorsConfigFile} {
+		data, err := os.ReadFile(filepath.Join(configDir, name))
+		if err != nil {
+			// Unreadable file must never hash-equal the applied state.
+			fmt.Fprintf(h, "unreadable:%s:%v\n", name, err)
+			continue
+		}
+		h.Write(data)
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// recordAppliedConfigHash stores the hash of the config files that produced
+// the currently-running nginx configuration (called on every successful
+// reload and once after boot).
+func (a *App) recordAppliedConfigHash() {
+	a.configHashMu.Lock()
+	a.lastAppliedConfigHash = a.configFilesHash()
+	a.configHashMu.Unlock()
+}
+
+// configUnchangedSinceApply reports whether the config files still match the
+// last successfully applied state.
+func (a *App) configUnchangedSinceApply() bool {
+	a.configHashMu.Lock()
+	applied := a.lastAppliedConfigHash
+	a.configHashMu.Unlock()
+	return applied != "" && applied == a.configFilesHash()
 }

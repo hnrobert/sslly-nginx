@@ -195,3 +195,54 @@ func TestParseStaticSiteKey(t *testing.T) {
 		})
 	}
 }
+
+func TestParseUpstreamGRPC(t *testing.T) {
+	cases := []struct {
+		key      string
+		host     string
+		port     string
+		protocol Protocol
+	}{
+		{"<grpc>9081", "127.0.0.1", "9081", ProtocolGRPC},
+		{"<grpc>192.168.50.2:50051", "192.168.50.2", "50051", ProtocolGRPC},
+		{"<grpc>grpc.example.com", "grpc.example.com", "50051", ProtocolGRPC}, // conventional default
+	}
+	for _, tc := range cases {
+		u := ParseUpstream(tc.key)
+		if u.Protocol != tc.protocol || u.Host != tc.host || u.Port != tc.port {
+			t.Errorf("ParseUpstream(%q) = %+v, want host=%s port=%s proto=%s", tc.key, u, tc.host, tc.port, tc.protocol)
+		}
+	}
+	// The prefix parses through the generic protocol branch; grpc upstreams
+	// must not be mistaken for stream (L4) mappings.
+	if ParseUpstream("<grpc>9081").Protocol.IsStream() {
+		t.Fatal("grpc must not count as a stream protocol")
+	}
+}
+
+func TestValidateMappingGRPCRules(t *testing.T) {
+	// Path-based listener on a gRPC upstream is rejected.
+	_, errs, _ := ValidateMapping("<grpc>9081", "example.com/api", false)
+	if len(errs) == 0 {
+		t.Fatal("path listener must be rejected for gRPC upstreams")
+	}
+	// Path suffix on the upstream itself is rejected too.
+	_, errs, _ = ValidateMapping("<grpc>9081/x", "example.com", false)
+	if len(errs) == 0 {
+		t.Fatal("upstream path suffix must be rejected for gRPC upstreams")
+	}
+	// Explicit stream listener is rejected.
+	_, errs, _ = ValidateMapping("<grpc>9081", "<tcp>example.com", false)
+	if len(errs) == 0 {
+		t.Fatal("tcp listener must be rejected for gRPC upstreams")
+	}
+	// Bare domain smart mode: no certificate -> HTTP (h2c), with -> HTTPS.
+	lc, errs, _ := ValidateMapping("<grpc>9081", "example.com", false)
+	if len(errs) != 0 || lc.Protocol != ProtocolHTTP {
+		t.Fatalf("smart mode without cert = %+v errs=%v, want http", lc, errs)
+	}
+	lc, errs, _ = ValidateMapping("<grpc>9081", "example.com", true)
+	if len(errs) != 0 || lc.Protocol != ProtocolHTTPS {
+		t.Fatalf("smart mode with cert = %+v errs=%v, want https", lc, errs)
+	}
+}
