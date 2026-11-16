@@ -66,6 +66,28 @@ message SetNoTrailingSlashResponse {
   CMsgApplyResult apply = 1;
 }
 
+// GetNoUpgradeHeadersRequest is empty.
+message GetNoUpgradeHeadersRequest {}
+
+// GetNoUpgradeHeadersResponse lists keys that do not send the WebSocket
+// upgrade headers.
+message GetNoUpgradeHeadersResponse {
+  // Listener keys with upgrade headers disabled, visible to the caller.
+  repeated string listener_keys = 1;
+}
+
+// SetNoUpgradeHeadersRequest replaces the whole exemption list.
+message SetNoUpgradeHeadersRequest {
+  // Complete new no_upgrade_headers list.
+  repeated string listener_keys = 1;
+}
+
+// SetNoUpgradeHeadersResponse reports the apply outcome.
+message SetNoUpgradeHeadersResponse {
+  // Reload pipeline outcome for this change.
+  CMsgApplyResult apply = 1;
+}
+
 // CMsgProxyEntry is one proxy.yaml top-level mapping: an upstream key and the
 // listener keys routed to it.
 message CMsgProxyEntry {
@@ -81,9 +103,9 @@ message CMsgProxyEntry {
 }
 
 // ProxyService manages proxy.yaml: upstream entries (port -> listeners) and
-// the no_trailing_slash list. All mutating RPCs write the file (comments and
-// key order preserved), then run the validated reload pipeline synchronously
-// and report the outcome in CMsgApplyResult.
+// the no_trailing_slash / no_upgrade_headers lists. All mutating RPCs write
+// the file (comments and key order preserved), then run the validated reload
+// pipeline synchronously and report the outcome in CMsgApplyResult.
 service ProxyService {
   // ListProxyEntries returns every upstream entry in proxy.yaml declaration
   // order. Entries the caller is not allowed to read are filtered out.
@@ -124,6 +146,23 @@ service ProxyService {
   rpc SetNoTrailingSlash(SetNoTrailingSlashRequest) returns (SetNoTrailingSlashResponse) {
     option (google.api.http) = {
       post: "/SetNoTrailingSlash"
+      body: "*"
+    };
+  }
+
+  // GetNoUpgradeHeaders returns the listener keys that do not send
+  // Upgrade/Connection to the upstream.
+  rpc GetNoUpgradeHeaders(GetNoUpgradeHeadersRequest) returns (GetNoUpgradeHeadersResponse) {
+    option (google.api.http) = {
+      post: "/GetNoUpgradeHeaders"
+      body: "*"
+    };
+  }
+
+  // SetNoUpgradeHeaders fully replaces the no_upgrade_headers list.
+  rpc SetNoUpgradeHeaders(SetNoUpgradeHeadersRequest) returns (SetNoUpgradeHeadersResponse) {
+    option (google.api.http) = {
+      post: "/SetNoUpgradeHeaders"
       body: "*"
     };
   }

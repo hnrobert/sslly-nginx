@@ -157,6 +157,30 @@ func TestEditorSetNoTrailingSlash(t *testing.T) {
 	}
 }
 
+func TestEditorSetNoUpgradeHeaders(t *testing.T) {
+	dir := t.TempDir()
+	copyFixture(t, dir, proxyExampleFile, proxyConfigFile)
+	ed := NewEditor(dir)
+
+	if _, err := ed.SetNoUpgradeHeaders([]string{"shared.example.com/api"}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.NoUpgradeHeaders) != 1 || cfg.NoUpgradeHeaders[0] != "shared.example.com/api" {
+		t.Fatalf("unexpected NoUpgradeHeaders: %v", cfg.NoUpgradeHeaders)
+	}
+	// OrderedPorts must not include no_upgrade_headers.
+	for _, k := range cfg.OrderedPorts {
+		if k == "no_upgrade_headers" {
+			t.Fatalf("no_upgrade_headers leaked into OrderedPorts: %v", cfg.OrderedPorts)
+		}
+	}
+}
+
 func TestEditorCorsUpsertPreservesComments(t *testing.T) {
 	dir := t.TempDir()
 	copyFixture(t, dir, corsExampleFile, corsConfigFile)

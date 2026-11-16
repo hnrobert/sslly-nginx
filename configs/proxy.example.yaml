@@ -92,6 +92,14 @@
 #   - shared.example.com/api      # /api and /api/ both work, no redirect
 #   - example.com/docs            # applies to both proxy routes and static sites
 
+# By default, HTTP proxy routes send WebSocket Upgrade/Connection headers.
+# Omit those settings for upstreams that cannot accept Connection: upgrade.
+# Values exactly match domain + path, as with no_trailing_slash (not a prefix).
+# Disables WebSocket upgrades on these routes; other routes are unchanged.
+# no_upgrade_headers:
+#   - api.example.com
+#   - shared.example.com/api
+
 # =============================================================================
 # Listener Configuration Examples
 # =============================================================================

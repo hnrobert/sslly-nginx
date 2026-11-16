@@ -292,6 +292,22 @@ func (e *Editor) SetNoTrailingSlash(listenerKeys []string) (prev []byte, err err
 	return prev, nil
 }
 
+// SetNoUpgradeHeaders fully replaces the no_upgrade_headers list.
+func (e *Editor) SetNoUpgradeHeaders(listenerKeys []string) (prev []byte, err error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	prev, doc, root, err := loadDoc(e.path(proxyConfigFile))
+	if err != nil {
+		return nil, err
+	}
+	setSeqValue(root, "no_upgrade_headers", listenerKeys)
+	if err := WriteYAMLNodeFileAtomic(e.path(proxyConfigFile), doc); err != nil {
+		return nil, err
+	}
+	return prev, nil
+}
+
 // --- cors.yaml -----------------------------------------------------------
 
 // SetCorsRule creates or updates one rule. Only fields flagged in presence

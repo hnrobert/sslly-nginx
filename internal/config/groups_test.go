@@ -102,6 +102,7 @@ func TestLoadGroupValidation(t *testing.T) {
 		"empty segment":    "a..b: \n  8080: [a.com]\n",
 		"reserved nested":  "ok: \n  log: \n    8080: [a.com]\n",
 		"reserved deep":    "ok: \n  fine: \n    no_trailing_slash: \n      8080: [a.com]\n",
+		"reserved upgrade": "ok: \n  no_upgrade_headers: \n    8080: [a.com]\n",
 	}
 	for name, content := range cases {
 		t.Run(name, func(t *testing.T) {
