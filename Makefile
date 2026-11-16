@@ -57,7 +57,11 @@ proto-lint:
 	cd proto && buf lint
 
 proto-breaking:
-	cd proto && buf breaking --against '.git#branch=main'
+	@if git cat-file -e main:proto/buf.yaml 2>/dev/null; then \
+		cd proto && buf breaking --against '../.git#branch=main,subdir=proto'; \
+	else \
+		echo "proto-breaking: no proto/ on main yet, skipping"; \
+	fi
 
 # Push the proto module to the Buf Schema Registry (creates the public
 # repository on first push). CI attaches --label <tag> on v* tags.
