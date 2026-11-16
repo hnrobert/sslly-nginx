@@ -57,6 +57,9 @@ log:
 
 no_trailing_slash:
   - b.example.com
+
+no_upgrade_headers:
+  - a.example.com
 `
 	if err := os.WriteFile(filepath.Join(tmpDir, "proxy.yaml"), []byte(proxyYAML), 0644); err != nil {
 		t.Fatal(err)
@@ -77,8 +80,12 @@ no_trailing_slash:
 		}
 	}
 
+	if len(cfg.NoUpgradeHeaders) != 1 || cfg.NoUpgradeHeaders[0] != "a.example.com" {
+		t.Errorf("unexpected NoUpgradeHeaders: %v", cfg.NoUpgradeHeaders)
+	}
+
 	// Special keys must not survive into OrderedPorts (nor Ports).
-	for _, special := range []string{"cors", "log", "no_trailing_slash"} {
+	for _, special := range []string{"cors", "log", "no_trailing_slash", "no_upgrade_headers"} {
 		if _, ok := cfg.Ports[special]; ok {
 			t.Errorf("%q should not be in Ports", special)
 		}
