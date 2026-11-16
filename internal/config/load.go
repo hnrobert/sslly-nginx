@@ -55,7 +55,7 @@ func Load(configDir string) (*Config, error) {
 // reservedGroupNames may not be used as group path segments: they are (or
 // collide with) the special top-level keys of proxy.yaml.
 var reservedGroupNames = map[string]bool{
-	"cors": true, "log": true, "no_trailing_slash": true,
+	"cors": true, "log": true, "no_trailing_slash": true, "no_upgrade_headers": true,
 }
 
 // validGroupNameSeg reports whether s is a legal single group-path segment
@@ -189,6 +189,10 @@ func parseProxyDoc(data []byte, config *Config) error {
 		case "no_trailing_slash":
 			if err := v.Decode(&config.NoTrailingSlash); err != nil {
 				return fmt.Errorf("no_trailing_slash: %w", err)
+			}
+		case "no_upgrade_headers":
+			if err := v.Decode(&config.NoUpgradeHeaders); err != nil {
+				return fmt.Errorf("no_upgrade_headers: %w", err)
 			}
 		default:
 			switch v.Kind {

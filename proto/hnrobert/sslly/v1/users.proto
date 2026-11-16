@@ -67,7 +67,7 @@ message CMsgPermission {
 enum EPermissionSurface {
   // Unspecified; treated as no permission.
   E_PERMISSION_SURFACE_UNSPECIFIED = 0;
-  // proxy.yaml entries and no_trailing_slash.
+  // proxy.yaml entries, no_trailing_slash and no_upgrade_headers.
   E_PERMISSION_SURFACE_PROXY = 1;
   // cors.yaml rules.
   E_PERMISSION_SURFACE_CORS = 2;

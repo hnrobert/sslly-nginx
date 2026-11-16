@@ -308,6 +308,65 @@ func TestGenerateConfig_DefaultTrailingSlash_ProxyRoute(t *testing.T) {
 	}
 }
 
+func TestGenerateConfig_NoUpgradeHeaders_ProxyRoute(t *testing.T) {
+	cfg := &config.Config{
+		CORS: map[string]config.CORSConfig{},
+		Ports: map[string][]string{
+			"8080": {"example.com/api"},
+		},
+		NoUpgradeHeaders: []string{"example.com/api"},
+	}
+
+	ng := GenerateConfig(cfg, map[string]ssl.Certificate{})
+
+	if strings.Contains(ng, "proxy_set_header Upgrade") {
+		t.Error("no_upgrade_headers: Upgrade header should not be generated for example.com/api")
+	}
+	if strings.Contains(ng, "proxy_set_header Connection") {
+		t.Error("no_upgrade_headers: Connection header should not be generated for example.com/api")
+	}
+	if !strings.Contains(ng, "location /api/") {
+		t.Error("proxy location /api/ should still be present")
+	}
+}
+
+func TestGenerateConfig_NoUpgradeHeaders_RootPath(t *testing.T) {
+	cfg := &config.Config{
+		CORS: map[string]config.CORSConfig{},
+		Ports: map[string][]string{
+			"8080": {"api.example.com"},
+		},
+		NoUpgradeHeaders: []string{"api.example.com"},
+	}
+
+	ng := GenerateConfig(cfg, map[string]ssl.Certificate{})
+
+	if strings.Contains(ng, "proxy_set_header Upgrade") {
+		t.Error("no_upgrade_headers: Upgrade header should not be generated for api.example.com")
+	}
+	if !strings.Contains(ng, "location / {") {
+		t.Error("root proxy location should still be present")
+	}
+}
+
+func TestGenerateConfig_DefaultUpgradeHeaders_ProxyRoute(t *testing.T) {
+	cfg := &config.Config{
+		CORS: map[string]config.CORSConfig{},
+		Ports: map[string][]string{
+			"8080": {"example.com/api"},
+		},
+	}
+
+	ng := GenerateConfig(cfg, map[string]ssl.Certificate{})
+
+	if !strings.Contains(ng, "proxy_set_header Upgrade $http_upgrade;") {
+		t.Error("default: Upgrade header should be generated")
+	}
+	if !strings.Contains(ng, `proxy_set_header Connection "upgrade";`) {
+		t.Error("default: Connection: upgrade header should be generated")
+	}
+}
+
 func TestGenerateConfig_NoTrailingSlash_StaticSite(t *testing.T) {
 	tmpDir := t.TempDir()
 	staticDir := filepath.Join(tmpDir, "static")

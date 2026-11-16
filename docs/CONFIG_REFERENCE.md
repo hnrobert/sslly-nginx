@@ -331,6 +331,65 @@ no_trailing_slash:
   - example.com/api
 ```
 
+### WebSocket Upgrade Headers
+
+Every proxy location carries the WebSocket upgrade headers so gRPC and
+WebSocket upstreams work out of the box:
+
+```nginx
+proxy_set_header Upgrade $http_upgrade;
+proxy_set_header Connection "upgrade";
+```
+
+`Connection: upgrade` is sent unconditionally, including for plain HTTP
+requests. Most upstreams ignore it, but a strict gateway can take any request
+carrying it as a WebSocket handshake attempt and reject it. To drop both
+headers for specific listener keys, add a `no_upgrade_headers` list to
+`proxy.yaml`:
+
+```yaml
+8080:
+  - api.example.com
+  - example.com/api
+
+# Do not send upgrade headers to these paths
+no_upgrade_headers:
+  - api.example.com
+```
+
+With `no_upgrade_headers`, the two `proxy_set_header` lines are omitted and
+nginx falls back to `Connection: close` for the upstream request:
+
+```nginx
+# Generated when the listener key is in no_upgrade_headers
+location / {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_http_version 1.1;
+    # no Upgrade / Connection headers here
+}
+```
+
+**Rules:**
+
+- Values must exactly match the `listener_key` entries (domain, or domain + path, e.g. `api.example.com` or `example.com/api`)
+- Applies to proxy routes only — static sites and TCP/UDP streams are unaffected
+- The route can no longer carry WebSocket or gRPC upgrades
+
+**Example — mixed config:**
+
+```yaml
+# CCHP gateway: must not see Connection: upgrade
+8080:
+  - api-cchp.example.com
+
+# Plain web app: keep WebSocket support
+9090:
+  - app.example.com
+
+no_upgrade_headers:
+  - api-cchp.example.com
+```
+
 ---
 
 ## Validation Rules

@@ -103,7 +103,7 @@ func generateStaticSiteLocations(sb *strings.Builder, routes []StaticRouteConfig
 }
 
 // generateProxyLocations generates nginx location blocks for proxy routes
-func generateProxyLocations(sb *strings.Builder, routes []RouteConfig, corsConfig *config.CORSConfig, noTrailingSlash map[string]bool) {
+func generateProxyLocations(sb *strings.Builder, routes []RouteConfig, corsConfig *config.CORSConfig, noTrailingSlash, noUpgradeHeaders map[string]bool) {
 	corsHeaders := generateCORSHeaders(corsConfig)
 
 	// Sort routes by path length (longest first)
@@ -144,6 +144,15 @@ func generateProxyLocations(sb *strings.Builder, routes []RouteConfig, corsConfi
 			}
 		}
 
+		websocketHeaders := `
+            # WebSocket support
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+`
+		if noUpgradeHeaders[route.DomainPath] {
+			websocketHeaders = ""
+		}
+
 		sb.WriteString(fmt.Sprintf(`        location %s {
             proxy_pass %s;
             proxy_http_version 1.1;
@@ -154,11 +163,7 @@ func generateProxyLocations(sb *strings.Builder, routes []RouteConfig, corsConfi
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Host $http_host;
             proxy_set_header X-Forwarded-Proto $scheme;
-
-            # WebSocket support
-            proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection "upgrade";
-
+%s
             # Timeouts
             proxy_connect_timeout 60s;
             proxy_send_timeout 60s;
@@ -167,6 +172,6 @@ func generateProxyLocations(sb *strings.Builder, routes []RouteConfig, corsConfi
 %s
         }
 
-`, locationPath, proxyPass, corsHeaders))
+`, locationPath, proxyPass, websocketHeaders, corsHeaders))
 	}
 }

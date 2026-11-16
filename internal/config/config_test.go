@@ -34,6 +34,34 @@ no_trailing_slash:
 	}
 }
 
+func TestLoad_NoUpgradeHeaders(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	proxyYAML := `8080:
+  - api.example.com
+  - example.com/api
+
+no_upgrade_headers:
+  - example.com/api
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "proxy.yaml"), []byte(proxyYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(tmpDir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if len(cfg.NoUpgradeHeaders) != 1 || cfg.NoUpgradeHeaders[0] != "example.com/api" {
+		t.Errorf("unexpected NoUpgradeHeaders: %v", cfg.NoUpgradeHeaders)
+	}
+
+	if _, ok := cfg.Ports["no_upgrade_headers"]; ok {
+		t.Error("no_upgrade_headers should not appear in Ports map")
+	}
+}
+
 func TestLoad_OrderedPorts(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -78,7 +106,7 @@ no_trailing_slash:
 	}
 
 	// Special keys must not survive into OrderedPorts (nor Ports).
-	for _, special := range []string{"cors", "log", "no_trailing_slash"} {
+	for _, special := range []string{"cors", "log", "no_trailing_slash", "no_upgrade_headers"} {
 		if _, ok := cfg.Ports[special]; ok {
 			t.Errorf("%q should not be in Ports", special)
 		}

@@ -17,6 +17,12 @@ func GenerateConfig(cfg *config.Config, certMap map[string]ssl.Certificate) stri
 		noTrailingSlash[p] = true
 	}
 
+	// Build a set of paths that should not get the WebSocket upgrade headers.
+	noUpgradeHeaders := make(map[string]bool, len(cfg.NoUpgradeHeaders))
+	for _, p := range cfg.NoUpgradeHeaders {
+		noUpgradeHeaders[p] = true
+	}
+
 	var sb strings.Builder
 
 	// Read ports from environment with sensible defaults
@@ -299,7 +305,7 @@ events {
 
 			// Generate location blocks for proxy routes
 			if len(routes) > 0 {
-				generateProxyLocations(&sb, routes, corsConfig, noTrailingSlash)
+				generateProxyLocations(&sb, routes, corsConfig, noTrailingSlash, noUpgradeHeaders)
 			}
 
 			sb.WriteString(`    }
@@ -344,7 +350,7 @@ events {
 
 		// Generate location blocks for proxy routes
 		if len(routes) > 0 {
-			generateProxyLocations(&sb, routes, corsConfig, noTrailingSlash)
+			generateProxyLocations(&sb, routes, corsConfig, noTrailingSlash, noUpgradeHeaders)
 		}
 
 		sb.WriteString(`    }

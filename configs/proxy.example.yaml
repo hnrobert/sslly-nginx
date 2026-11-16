@@ -92,6 +92,17 @@
 #   - shared.example.com/api      # /api and /api/ both work, no redirect
 #   - example.com/docs            # applies to both proxy routes and static sites
 
+# Every proxy location sends the WebSocket upgrade headers by default:
+#   proxy_set_header Upgrade $http_upgrade;
+#   proxy_set_header Connection "upgrade";
+# Use no_upgrade_headers to drop both for specific listener keys — needed when
+# the upstream (or a gateway in front of it) treats any request carrying
+# "Connection: upgrade" as a WebSocket handshake.
+
+# no_upgrade_headers:
+#   - api.example.com             # whole domain
+#   - shared.example.com/api      # one path
+
 # =============================================================================
 # Listener Configuration Examples
 # =============================================================================
