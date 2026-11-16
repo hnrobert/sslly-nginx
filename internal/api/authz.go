@@ -51,7 +51,7 @@ func entryResources(group, upstreamKey string, listenerKeys []string) []Resource
 }
 
 // listenerResources builds domain-only resources for a list of listener keys
-// (used by no_trailing_slash).
+// (used by no_trailing_slash and no_upgrade_headers).
 func listenerResources(listenerKeys []string) []Resource {
 	res := make([]Resource, 0, len(listenerKeys))
 	for _, lk := range listenerKeys {

@@ -148,3 +148,39 @@ func (p *proxyService) SetNoTrailingSlash(ctx context.Context, req *v1.SetNoTrai
 		Apply: p.srv.apply(config.ProxyConfigFile, prev),
 	}, nil
 }
+
+func (p *proxyService) GetNoUpgradeHeaders(ctx context.Context, _ *v1.GetNoUpgradeHeadersRequest) (*v1.GetNoUpgradeHeadersResponse, error) {
+	user := userFromContext(ctx)
+	cfg, err := config.Load(p.srv.cfg.ConfigDir)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "load config: %v", err)
+	}
+
+	resp := &v1.GetNoUpgradeHeadersResponse{}
+	for _, lk := range cfg.NoUpgradeHeaders {
+		if CanSee(user, config.SurfaceProxy, listenerResources([]string{lk})) {
+			resp.ListenerKeys = append(resp.ListenerKeys, lk)
+		}
+	}
+	return resp, nil
+}
+
+func (p *proxyService) SetNoUpgradeHeaders(ctx context.Context, req *v1.SetNoUpgradeHeadersRequest) (*v1.SetNoUpgradeHeadersResponse, error) {
+	keys := req.GetListenerKeys()
+	if len(keys) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "listener_keys must not be empty (use it to clear the list)")
+	}
+	if err := Authorize(userFromContext(ctx), config.SurfaceProxy, config.ModeReadWrite,
+		listenerResources(keys)); err != nil {
+		return nil, err
+	}
+
+	prev, err := p.srv.cfg.Editor.SetNoUpgradeHeaders(keys)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "write proxy.yaml: %v", err)
+	}
+
+	return &v1.SetNoUpgradeHeadersResponse{
+		Apply: p.srv.apply(config.ProxyConfigFile, prev),
+	}, nil
+}
