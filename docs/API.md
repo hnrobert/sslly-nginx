@@ -106,7 +106,8 @@ users:
 Semantics — deny by default, and **one rule must cover the whole request**
 (rules never combine):
 
-1. **Surface**: `proxy` (proxy.yaml entries + `no_trailing_slash`), `cors`
+1. **Surface**: `proxy` (proxy.yaml entries, `no_trailing_slash`,
+   `no_upgrade_headers`), `cors`
    (cors.yaml rules), `logs` (logs.yaml), `users` (user management).
 2. **Mode**: `read` satisfies read RPCs; `read-write` is required for
    mutations. List/get RPCs **filter out** entries the caller cannot see.
@@ -142,6 +143,8 @@ with the YAML rolled back.
 | DeleteProxyEntry   | `/v1/DeleteProxyEntry`   | `{"upstreamKey": "1234"}`                     |
 | GetNoTrailingSlash | `/v1/GetNoTrailingSlash` | `{}`                                          |
 | SetNoTrailingSlash | `/v1/SetNoTrailingSlash` | `{"listenerKeys": ["a/b"]}`                   |
+| GetNoUpgradeHeaders | `/v1/GetNoUpgradeHeaders` | `{}`                                        |
+| SetNoUpgradeHeaders | `/v1/SetNoUpgradeHeaders` | `{"listenerKeys": ["a/b"]}`                 |
 | ListCorsRules      | `/v1/ListCorsRules`      | `{}`                                          |
 | SetCorsRule        | `/v1/SetCorsRule`        | `{"rule": {...}, "updateMask": "..."}`        |
 | DeleteCorsRule     | `/v1/DeleteCorsRule`     | `{"key": "*.example.com"}`                    |
